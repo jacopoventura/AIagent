@@ -1,3 +1,4 @@
+"""AiAgent: a Claude-backed chat agent with conversation memory and automatic summarization."""
 import anthropic
 
 

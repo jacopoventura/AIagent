@@ -1,3 +1,4 @@
+"""Entrypoint: loads the API key from .env and runs the interactive AiAgent chat loop."""
 import os
 
 from dotenv import load_dotenv
@@ -12,9 +13,5 @@ if not ANTHROPIC_API_KEY:
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    """
-    Main function for running the agent
-    """
-
     agent = AiAgent(api_key=ANTHROPIC_API_KEY)
     agent.run()
