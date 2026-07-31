@@ -12,6 +12,9 @@ if not ANTHROPIC_API_KEY:
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
+    """
+    Main function for running the agent
+    """
 
     agent = AiAgent(api_key=ANTHROPIC_API_KEY)
     agent.run()

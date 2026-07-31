@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Pre-commit hook: block the commit unless the unit test suite passes.
+# Pre-commit hook: block the commit unless the unit tests pass and the pylint
+# score for main.py/src/ is at least PYLINT_MIN_SCORE/10.
 # Enabled via: git config core.hooksPath hooks
 
 set -euo pipefail
@@ -11,6 +12,7 @@ RESET='\033[0m'
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PYTHON="$REPO_ROOT/.venv/bin/python"
+PYLINT_MIN_SCORE=8
 
 if [ ! -x "$PYTHON" ]; then
     echo -e "${RED}pre-commit: virtualenv not found at .venv/bin/python - run:${RESET}"
@@ -24,6 +26,14 @@ if ! "$PYTHON" -m pytest "$REPO_ROOT/tests" -q; then
     echo -e "${RED}pre-commit: tests failed - commit aborted.${RESET}"
     exit 1
 fi
-
 echo -e "${GREEN}pre-commit: tests passed.${RESET}"
+
+echo -e "${YELLOW}pre-commit: running pylint (minimum score: ${PYLINT_MIN_SCORE}/10)...${RESET}"
+if ! "$PYTHON" -m pylint --fail-under="$PYLINT_MIN_SCORE" "$REPO_ROOT/main.py" "$REPO_ROOT/src"; then
+    echo ""
+    echo -e "${RED}pre-commit: pylint score below ${PYLINT_MIN_SCORE}/10 - commit aborted.${RESET}"
+    exit 1
+fi
+echo -e "${GREEN}pre-commit: pylint score OK.${RESET}"
+
 exit 0
