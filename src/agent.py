@@ -7,9 +7,10 @@ class AiAgent:
     Orchestrator of the AI agent: holds the Claude client and runs the chat loop.
     """
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, system_prompt: str | None = None) -> None:
         self.client = anthropic.Anthropic(api_key=api_key)
         self.__MODEL: str = "claude-haiku-4-5"
+        self.__SYSTEM_PROMPT_KWARGS: dict = {"system": system_prompt} if system_prompt is not None else {}
         self.__COUNT_OF_ANSWERS_TO_SUMMARIZE: int = 50              # Amount of answer to be summarized
         self.__COUNT_OF_ANSWERS_TO_KEEP_AFTER_SUMMARY: int = 10     # Amount of answers to keep after the summary
         self.__memory: list[dict] = []
@@ -22,7 +23,8 @@ class AiAgent:
         return self.client.messages.create(model=self.__MODEL,
                                            max_tokens=1024,
                                            messages=input_prompt,
-                                           stream=False)
+                                           stream=False,
+                                           **self.__SYSTEM_PROMPT_KWARGS)
 
 
     @staticmethod
