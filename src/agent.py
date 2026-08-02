@@ -15,16 +15,21 @@ class AiAgent:
         self.__COUNT_OF_ANSWERS_TO_KEEP_AFTER_SUMMARY: int = 10     # Amount of answers to keep after the summary
         self.__memory: list[dict] = []
 
-    def ask_claude(self, input_prompt: list[dict[str, str]]) -> anthropic.types.Message:
+    def ask_claude(self, input_prompt: list[dict[str, str]], print_stream: bool = False) -> anthropic.types.Message:
         """
-        Core call to LLM model via Anthropic API.
-        :return: LLM model response
+        Core call to LLM model via Anthropic API, using streaming.
+        :param input_prompt: conversation messages sent to the model.
+        :param print_stream: if True, print text chunks to stdout as they arrive.
+        :return: the full accumulated LLM model response.
         """
-        return self.client.messages.create(model=self.__MODEL,
-                                           max_tokens=1024,
-                                           messages=input_prompt,
-                                           stream=False,
-                                           **self.__SYSTEM_PROMPT_KWARGS)
+        with self.client.messages.stream(model=self.__MODEL,
+                                          max_tokens=1024,
+                                          messages=input_prompt,
+                                          **self.__SYSTEM_PROMPT_KWARGS) as stream:
+            for text in stream.text_stream:
+                if print_stream:
+                    print(text, end="", flush=True)
+            return stream.get_final_message()
 
 
     @staticmethod
@@ -102,7 +107,7 @@ class AiAgent:
 
             # Call the LLM model via API
             try:
-                agent_response = self.ask_claude(self.__memory)
+                agent_response = self.ask_claude(self.__memory, print_stream=True)
             except anthropic.RateLimitError as e:
                 retry_after = e.response.headers.get("retry-after", "a few")
                 print(f"Rate limited, please wait {retry_after} seconds and try again.")
@@ -116,4 +121,4 @@ class AiAgent:
 
             final_response = self.extract_text(agent_response)
             self.__add_assistant_message(final_response)
-            print(final_response)
+            print()

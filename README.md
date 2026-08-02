@@ -8,6 +8,7 @@ an agent that interprets results produced by a financial planning tool.
 
 - Python 3.14+
 - An [Anthropic API key](https://console.anthropic.com/) (Settings → API Keys)
+- To check the remaining credit: [console.anthropic.com/settings/billing](https://console.anthropic.com/settings/billing)
 
 ## Setup
 
