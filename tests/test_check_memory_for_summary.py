@@ -1,8 +1,8 @@
 """Tests for AiAgent._check_memory_for_summary.
 
-The method is exercised with small, test-friendly threshold constants
-(overridden on the fixture) instead of the real defaults (50/10), so each
-test only needs a handful of messages to reach the trigger condition.
+The method is exercised with small, test-friendly threshold constructor
+parameters (SUMMARIZE=3, KEEP=2) instead of the real defaults (50/10), so
+each test only needs a handful of messages to reach the trigger condition.
 
 ask_claude is always mocked - these tests never hit the real Anthropic API.
 """
@@ -38,9 +38,11 @@ def memory_of(pairs: int) -> list[dict]:
 @pytest.fixture
 def agent() -> AiAgent:
     """AiAgent with small summarization thresholds (SUMMARIZE=3, KEEP=2) and a mocked client."""
-    a = AiAgent(api_key="sk-ant-test-key-not-real")
-    a._AiAgent__COUNT_OF_ANSWERS_TO_SUMMARIZE = 3
-    a._AiAgent__COUNT_OF_ANSWERS_TO_KEEP_AFTER_SUMMARY = 2
+    a = AiAgent(
+        api_key="sk-ant-test-key-not-real",
+        count_of_answers_to_summarize=3,
+        count_of_answers_to_keep_after_summary=2,
+    )
     a.ask_claude = MagicMock(return_value=make_message("mocked summary text"))
     return a
 

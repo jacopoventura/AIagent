@@ -7,25 +7,42 @@ class AiAgent:
     Orchestrator of the AI agent: holds the Claude client and runs the chat loop.
     """
 
-    def __init__(self, api_key: str, system_prompt: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        system_prompt: str | None = None,
+        model: str = "claude-haiku-4-5",
+        max_tokens: int = 1024,
+        summary_max_tokens: int = 4096,
+        count_of_answers_to_summarize: int = 50,
+        count_of_answers_to_keep_after_summary: int = 10,
+    ) -> None:
         self.client = anthropic.Anthropic(api_key=api_key)
-        self.__MODEL: str = "claude-haiku-4-5"
-        self.__SYSTEM_PROMPT_KWARGS: dict = {"system": system_prompt} if system_prompt is not None else {}
-        self.__COUNT_OF_ANSWERS_TO_SUMMARIZE: int = 50              # Amount of answer to be summarized
-        self.__COUNT_OF_ANSWERS_TO_KEEP_AFTER_SUMMARY: int = 10     # Amount of answers to keep after the summary
+        self._model: str = model
+        self._system_prompt_kwargs: dict = {"system": system_prompt} if system_prompt is not None else {}
+        self._max_tokens: int = max_tokens                                          # Default max_tokens for chat calls
+        self._summary_max_tokens: int = summary_max_tokens                          # max_tokens for summarization calls
+        self._count_of_answers_to_summarize: int = count_of_answers_to_summarize    # Amount of answers to be summarized
+        self._count_of_answers_to_keep_after_summary: int = count_of_answers_to_keep_after_summary  # Amount of answers to keep after the summary
         self.__memory: list[dict] = []
 
-    def ask_claude(self, input_prompt: list[dict[str, str]], print_stream: bool = False) -> anthropic.types.Message:
+    def ask_claude(
+        self,
+        input_prompt: list[dict[str, str]],
+        print_stream: bool = False,
+        max_tokens: int | None = None,
+    ) -> anthropic.types.Message:
         """
         Core call to LLM model via Anthropic API, using streaming.
         :param input_prompt: conversation messages sent to the model.
         :param print_stream: if True, print text chunks to stdout as they arrive.
+        :param max_tokens: overrides the default max_tokens for this call (e.g. summarization needs more headroom).
         :return: the full accumulated LLM model response.
         """
-        with self.client.messages.stream(model=self.__MODEL,
-                                          max_tokens=1024,
+        with self.client.messages.stream(model=self._model,
+                                          max_tokens=max_tokens if max_tokens is not None else self._max_tokens,
                                           messages=input_prompt,
-                                          **self.__SYSTEM_PROMPT_KWARGS) as stream:
+                                          **self._system_prompt_kwargs) as stream:
             for text in stream.text_stream:
                 if print_stream:
                     print(text, end="", flush=True)
@@ -37,9 +54,10 @@ class AiAgent:
         """
         Extract text from an API response.
         :param response: agent full response dictionary.
-        :return: text extracted from response to be displayed to the user.
+        :return: text extracted from response, or "" if the response has no text block
+                 (e.g. a tool-use-only response).
         """
-        return next(block.text for block in response.content if block.type == "text")
+        return next((block.text for block in response.content if block.type == "text"), "")
 
     def __add_user_message(self, text: str) -> None:
         """
@@ -67,12 +85,13 @@ class AiAgent:
         :return: None
         """
 
-        # Divide length by 2 to get the count of answers from the agent
-        if len(self.__memory) / 2. > (self.__COUNT_OF_ANSWERS_TO_SUMMARIZE + self.__COUNT_OF_ANSWERS_TO_KEEP_AFTER_SUMMARY):
+        # len(memory) is the count of questions from the user and answers from the agent; compare against
+        # threshold*2 instead to avoid float division while keeping the same semantics.
+        if len(self.__memory) > (self._count_of_answers_to_summarize + self._count_of_answers_to_keep_after_summary) * 2:
 
             # Partition memory: the last KEEP*2 messages are kept verbatim, everything
             # before that is summarized. This partition never overlaps and never leaves a gap.
-            keep_count = self.__COUNT_OF_ANSWERS_TO_KEEP_AFTER_SUMMARY * 2
+            keep_count = self._count_of_answers_to_keep_after_summary * 2
             to_summarize = self.__memory[:-keep_count]
             to_keep = self.__memory[-keep_count:]
 
@@ -80,7 +99,10 @@ class AiAgent:
             for message in to_summarize:
                 prompt += "Role: " + message["role"] + ": " + message["content"] + "\n"
 
-            summary_response = self.ask_claude([{"role": "user", "content": prompt}])
+            summary_response = self.ask_claude(
+                [{"role": "user", "content": prompt}],
+                max_tokens=self._summary_max_tokens,
+            )
             summary_text = self.extract_text(summary_response)
 
             summary_message = {"role": "user", "content": f"[Summary of earlier conversation]\n{summary_text}"}
@@ -109,13 +131,19 @@ class AiAgent:
             try:
                 agent_response = self.ask_claude(self.__memory, print_stream=True)
             except anthropic.RateLimitError as e:
+                # Remove the user question from the list (last item) since this conversation failed
+                self.__memory.pop()
                 retry_after = e.response.headers.get("retry-after", "a few")
                 print(f"Rate limited, please wait {retry_after} seconds and try again.")
                 continue
             except anthropic.APIConnectionError:
+                # Remove the user question from the list (last item) since this conversation failed
+                self.__memory.pop()
                 print("Network error - could not reach Claude. Please try again.")
                 continue
             except anthropic.APIStatusError as e:
+                # Remove the user question from the list (last item) since this conversation failed
+                self.__memory.pop()
                 print(f"Claude API error ({e.status_code}): {e.message}")
                 continue
 

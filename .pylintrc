@@ -3,8 +3,7 @@
 max-line-length=150
 
 [BASIC]
-# Default attr-rgx only allows snake_case, which rejects private "constant"
-# attributes like self.__MODEL / self.__COUNT_OF_ANSWERS_TO_SUMMARIZE. This
-# accepts either normal snake_case attributes OR a double-underscore-prefixed
-# ALL_CAPS constant, without loosening the rule for anything else.
-attr-rgx=^(_{0,2}[a-z][a-z0-9_]*|__[A-Z][A-Z0-9_]*)$
+# Default attr-rgx only allows snake_case; this allows an optional one or two
+# leading underscores (protected/name-mangled attributes like self.__memory)
+# while keeping everything else snake_case.
+attr-rgx=^_{0,2}[a-z][a-z0-9_]*$
