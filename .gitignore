@@ -24,3 +24,6 @@ env/
 
 # Logs
 *.log
+
+# Claude
+CLAUDE.md
