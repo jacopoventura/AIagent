@@ -1,65 +1,40 @@
-# Personal context — TEMPLATE
+# Personal context — how to write your CV and career-plan documents
 
-Copy to `context/profile.md` (gitignored) and replace with real content. The
-agent loads that file into its system prompt, so everything here shapes every
-answer.
+There is no template file to fill in here anymore. The agent reads every
+`.docx` file in `data/personal/` (gitignored) directly, fresh on each startup —
+see `src/context.py::load_personal_context`. Edit your Word documents, the next
+run picks up the change; there is no separate markdown file to keep in sync.
 
-Keep it dense and factual. This is not a CV for a recruiter — it is a briefing
-for an advisor who needs the honest version, including the parts you would not
-put in writing elsewhere.
+This file is guidance on how to write those documents so the extraction — which
+understands headings and tables, not just plain text — captures them well.
 
-Snapshot date: YYYY-MM-DD  ← update when anything material changes.
+## What the loader understands
 
----
+- **Body paragraphs** pass through as plain text.
+- **Heading 1 / 2 / 3** styles map to markdown headings, so section structure
+  survives. Bold or underlined "Normal"-style text does *not* — use the actual
+  Heading style in Word, not manual formatting, or the section will flatten
+  into a wall of undifferentiated text.
+- **Tables** are rendered as markdown pipe tables, in document order relative
+  to the surrounding paragraphs — so a table stays attached to the heading
+  above it. Keep tables simple and rectangular (no merged cells); the renderer
+  assumes one table row is one markdown row.
+- Every file's content is grounded under a `## <filename>` heading, so name
+  the files for what they are (e.g. `Career_Plan_JacopoVentura.docx`).
 
-## 1. Who I am
+## What to put where
 
-- Current role, employer, seniority, tenure.
-- Core strengths — what I am genuinely good at, in concrete terms.
-- Known weaknesses and constraints that affect career choices.
-- Credentials that carry weight (degrees, patents, publications, certifications).
-- Languages, citizenship, work authorisation.
+- **CV**: role history, seniority, credentials, core strengths — the "who I
+  am" the agent should reason from when a career suggestion needs to be
+  realistic rather than generic.
+- **Career plan**: target role and compensation by when, the chosen path and
+  the alternatives considered, decision log of settled choices, salary bands
+  or timelines — put these in tables, they are exactly what used to get
+  silently dropped before table extraction existed.
 
-## 2. Career plan
+## What is *not* sourced from these documents
 
-- Target: role type and compensation, by when.
-- Hard exit condition: e.g. stop working by a given age, in a given country.
-- Chosen path and the alternatives, with the trigger that would switch between
-  them.
-- Deliberately excluded paths, and why — so the agent does not keep proposing
-  them.
-- Decision log: significant choices already made and settled (so they are not
-  re-litigated every conversation).
-
-## 3. Financial position and goals
-
-- Target liquid portfolio and the reasoning behind that number.
-- Current allocation at a high level (the live figures come from the Sheets
-  tool — do not duplicate them here, they will go stale).
-- Withdrawal, preservation and confidence assumptions.
-- Tax residence now and planned, plus any regime that matters.
-- Non-negotiables (e.g. capital to preserve for family).
-
-## 4. Public portfolio
-
-What exists on GitHub and what each project is meant to demonstrate. Update
-when repos are renamed, added or archived — a confidently wrong reference to a
-renamed repo is worse than no reference.
-
-| Repo | What it is | What it demonstrates |
-|---|---|---|
-| `example-repo-1` | one line | e.g. quantitative modelling, testing discipline |
-| `example-repo-2` | one line | e.g. agent architecture, MCP integration |
-
-Also note: which repos are pinned, which are archived, and anything deliberately
-not public.
-
-## 5. How I want to be advised
-
-- Directness level: e.g. state disagreement plainly, do not hedge.
-- What I do *not* want: e.g. motivational framing, generic advice, restating my
-  own numbers back to me.
-- Standing constraints on recommendations: time available per week, risk
-  appetite, family considerations.
-- Where I am prone to going wrong, so the agent can flag it: e.g. building
-  instead of shipping, moving goalposts when a metric is nearly met.
+Financial position and goals, the public GitHub portfolio, and advising-style
+preferences are not covered by CV/career-plan text — they still need a source
+(a live Sheets tool for the first, something else for the other two). See the
+open item in `TODO.md` Phase 2.

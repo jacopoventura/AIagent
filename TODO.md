@@ -61,18 +61,25 @@ Blocked by: nothing.
 
 - [x] CV and career plan: parsed directly from `.docx` files in `data/personal/`
       (gitignored) on every agent startup — `src/context.py::load_personal_context`
-      globs the directory, extracts paragraph text, concatenates one section per
-      file. Superseded the original `context/profile.md` plan below: the source
-      documents get edited often, and a hand-curated copy would drift out of
-      sync with them. Parsing costs milliseconds, once, at process start, so
-      "static context" still holds — it just gets read fresh each run instead
-      of hand-copied once. A missing or corrupt file is skipped with a warning,
-      never crashes startup.
-- [ ] `context.example.md`'s remaining sections — financial position and goals,
-      public GitHub portfolio, how I want to be advised — are not covered by
-      the CV/career-plan docx files and still need a source. Decide whether
-      that stays a small curated file (trimmed `context.example.md` shape) or
-      folds into the system prompt directly.
+      globs the directory, walks paragraphs *and tables* in document order, maps
+      Heading 1/2/3 styles to markdown, renders tables as markdown pipe tables,
+      concatenates one section per file. Superseded the original
+      `context/profile.md` plan below: the source documents get edited often,
+      and a hand-curated copy would drift out of sync with them. Parsing costs
+      milliseconds, once, at process start, so "static context" still holds —
+      it just gets read fresh each run instead of hand-copied once. A missing
+      or unreadable file is skipped with a warning, never crashes startup.
+      `context.example.md` now documents how to structure the source documents
+      (use real Heading styles, put tabular data in actual tables) instead of
+      being a markdown template to fill in.
+      Fixed post-launch: the first version read `document.paragraphs` only —
+      python-docx keeps table content in a separate `document.tables`
+      collection, so every table (salary bands, timelines) was silently
+      dropped with no error. Table-aware, order-preserving extraction fixed it.
+- [ ] Financial position and goals, public GitHub portfolio, how I want to be
+      advised — are not covered by the CV/career-plan docx files and still need
+      a source. Decide whether that's a small curated file or folds into the
+      system prompt directly.
 - [ ] Public portfolio section is a dated **snapshot**, not live data. A GitHub
       API tool would add a dependency and a round-trip to fetch something that
       changes monthly; what matters for career conversations is what each repo

@@ -1,13 +1,20 @@
 """Tests for load_personal_context and generate_personal_career_and_finance_plan.
 
-Docx fixtures are generated on the fly with python-docx, never committed -
-the privacy guard blocks .docx files from entering git history regardless.
+Most docx fixtures are generated on the fly with python-docx so nothing binary
+needs to be committed. tests/data/Career_Plan_Test.docx is the one exception: a
+synthetic (fake numbers, fake content) but Word-shaped fixture, checked in under
+a targeted carve-out in hooks/privacy-guard.sh - see that file for why it's safe
+to commit where a real personal .docx never would be.
 """
+import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 from docx import Document
 
-from src.context import generate_personal_career_and_finance_plan, load_personal_context
+from src.context import _heading_prefix, generate_personal_career_and_finance_plan, load_personal_context
+
+FIXTURE_DOCX = Path(__file__).parent / "data" / "Career_Plan_Test.docx"
 
 
 def make_docx(path: Path, paragraphs: list[str]) -> None:
@@ -15,6 +22,18 @@ def make_docx(path: Path, paragraphs: list[str]) -> None:
     document = Document()
     for text in paragraphs:
         document.add_paragraph(text)
+    document.save(path)
+
+
+def make_docx_with_table(path: Path, table_rows: list[list[str]], heading: str | None = None) -> None:
+    """Write a .docx with an optional Heading 1 paragraph followed by a table."""
+    document = Document()
+    if heading is not None:
+        document.add_heading(heading, level=1)
+    table = document.add_table(rows=len(table_rows), cols=len(table_rows[0]))
+    for row_idx, row in enumerate(table_rows):
+        for col_idx, cell_text in enumerate(row):
+            table.cell(row_idx, col_idx).text = cell_text
     document.save(path)
 
 
@@ -68,6 +87,86 @@ class TestLoadPersonalContext:
 
         assert "career content" in result
         assert "could not read corrupt.docx" in capsys.readouterr().out
+
+
+class TestLoadPersonalContextTables:
+    """Regression coverage for the table-drop bug: document.paragraphs silently
+    omits table content, so a career plan's salary tables never reached the
+    system prompt even though extraction raised no error."""
+
+    def test_table_is_rendered_as_markdown_pipe_table(self, tmp_path):
+        make_docx_with_table(tmp_path / "career_plan.docx", [["Plan", "Salary"], ["A", "CHF 300k"]])
+
+        result = load_personal_context(tmp_path)
+
+        assert "| Plan | Salary |" in result
+        assert "| --- | --- |" in result
+        assert "| A | CHF 300k |" in result
+
+    def test_table_stays_after_its_heading_in_document_order(self, tmp_path):
+        make_docx_with_table(tmp_path / "career_plan.docx", [["Plan", "Salary"]], heading="Salary bands")
+
+        result = load_personal_context(tmp_path)
+
+        assert result.index("Salary bands") < result.index("| Plan | Salary |")
+
+    def test_heading_style_maps_to_markdown_heading(self, tmp_path):
+        document = Document()
+        document.add_heading("Career plan", level=1)
+        document.add_paragraph("Body text.")
+        document.save(tmp_path / "career_plan.docx")
+
+        result = load_personal_context(tmp_path)
+
+        assert "### Career plan" in result
+        assert "Body text." in result
+        assert "### Body text." not in result
+
+
+class TestHeadingPrefix:
+    def test_missing_style_is_treated_as_body_text(self):
+        """Some real-world paragraphs resolve `.style` to None (e.g. a style id
+        the document's style part doesn't define) - must not raise AttributeError."""
+        paragraph = SimpleNamespace(style=None)
+
+        assert _heading_prefix(paragraph) is None
+
+    def test_non_heading_style_is_treated_as_body_text(self):
+        paragraph = SimpleNamespace(style=SimpleNamespace(name="Normal"))
+
+        assert _heading_prefix(paragraph) is None
+
+    def test_heading_1_maps_to_three_hashes(self):
+        paragraph = SimpleNamespace(style=SimpleNamespace(name="Heading 1"))
+
+        assert _heading_prefix(paragraph) == "###"
+
+
+class TestLoadPersonalContextAgainstFixtureFile:
+    """End-to-end completeness check against a Word-shaped fixture, not the
+    minimal ones built paragraph-by-paragraph above. Reads every paragraph and
+    table cell straight from the source .docx and asserts each one survives
+    extraction verbatim - this is what would have caught the table-drop bug
+    immediately, since the fixture carries a real salary table."""
+
+    def test_every_paragraph_and_table_cell_survives_extraction(self, tmp_path):
+        shutil.copy(FIXTURE_DOCX, tmp_path / FIXTURE_DOCX.name)
+        source = Document(FIXTURE_DOCX)
+
+        expected_snippets = [p.text.strip() for p in source.paragraphs if p.text.strip()]
+        expected_snippets += [
+            cell.text.strip()
+            for table in source.tables
+            for row in table.rows
+            for cell in row.cells
+            if cell.text.strip()
+        ]
+        assert expected_snippets, "fixture has no extractable content - test would pass vacuously"
+
+        result = load_personal_context(tmp_path)
+
+        missing = [snippet for snippet in expected_snippets if snippet not in result]
+        assert missing == [], f"lost during extraction: {missing}"
 
 
 class TestGeneratePersonalCareerAndFinancePlan:

@@ -15,9 +15,10 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RESET='\033[0m'
 
 # ── 1. Filenames that must never be committed ────────────────────────────────
 # Personal data, generated run outputs, credentials, office documents.
+OFFICE_DOC_PATTERN='\.(docx|xlsx|pptx|pdf|numbers|pages)$'
 BLOCKED_FILES='(^|/)config\.toml$
 (^|/)\.env$
-\.(docx|xlsx|pptx|pdf|numbers|pages)$
+'"$OFFICE_DOC_PATTERN"'
 \.(pkl|pickle|sqlite|db)$
 (^|/)(credentials|token|client_secret|service[-_]account).*\.json$
 (^|/)CLAUDE\.md$
@@ -49,6 +50,14 @@ privacy_guard() {
         [ -z "$pattern" ] && continue
         local hit
         hit="$(echo "$staged" | grep -E -- "$pattern" || true)"
+        # tests/data/ holds synthetic, non-personal fixture files (e.g. a fake
+        # Career_Plan_Test.docx) that docx-parser tests need committed so they
+        # run for anyone else and in CI. Exempt only from the office-document
+        # extension check — every other rule below still applies there, so a
+        # real personal file or credential would still be blocked.
+        if [ "$pattern" = "$OFFICE_DOC_PATTERN" ]; then
+            hit="$(echo "$hit" | grep -Ev -- '(^|/)tests/data/' || true)"
+        fi
         [ -n "$hit" ] && blocked+="$hit"$'\n'
     done <<< "$BLOCKED_FILES"
 
