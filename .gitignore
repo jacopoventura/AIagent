@@ -27,3 +27,6 @@ env/
 
 # Claude
 CLAUDE.md
+
+# Personal data
+/data/personal/
