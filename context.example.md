@@ -31,10 +31,23 @@ understands headings and tables, not just plain text — captures them well.
   the alternatives considered, decision log of settled choices, salary bands
   or timelines — put these in tables, they are exactly what used to get
   silently dropped before table extraction existed.
+- **Public portfolio**: a table of `Repo | What it is | What it demonstrates`
+  for what's on GitHub. A dated snapshot you update by hand when repos are
+  renamed, added or archived — not a live feed, deliberately, since what
+  matters for career conversations is what each repo demonstrates, not its
+  star count. Keep it in its own file; it changes on a different cadence than
+  the career plan.
 
 ## What is *not* sourced from these documents
 
-Financial position and goals, the public GitHub portfolio, and advising-style
-preferences are not covered by CV/career-plan text — they still need a source
-(a live Sheets tool for the first, something else for the other two). See the
-open item in `TODO.md` Phase 2.
+- **How you want to be advised** — directness, what you don't want, standing
+  constraints — isn't a fact about you to extract from a document. It's an
+  instruction about the agent's behavior, so it's hand-written directly into
+  the system prompt in `main.py` instead.
+- **Financial position and goals** — the target portfolio value and the
+  assumptions behind it (withdrawal rate, confidence, tax treatment) aren't
+  static facts either; they're computed by the simulator from hypotheses that
+  already live as config in `portfolio-lifecycle-simulator`. Writing them into
+  a docx here would duplicate that and go stale the moment an assumption
+  changes there. This comes from a live tool call once the simulator MCP
+  server exists (`TODO.md` Phase 4), not from a document.

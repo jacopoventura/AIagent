@@ -173,6 +173,70 @@ class TestErrorHandling:
         assert agent._AiAgent__memory == original
 
 
+class TestFlattenContent:
+    """Regression coverage: message content is a list of blocks once a message has
+    been through the tool loop, not always a string - _check_memory_for_summary
+    used to concatenate content directly and raised TypeError on a list."""
+
+    def test_plain_string_passes_through_unchanged(self):
+        assert AiAgent._flatten_content("hello") == "hello"
+
+    def test_flattens_a_text_block_object(self):
+        content = [SimpleNamespace(type="text", text="hi there")]
+
+        assert AiAgent._flatten_content(content) == "hi there"
+
+    def test_flattens_a_tool_use_block_object(self):
+        content = [SimpleNamespace(type="tool_use", id="call_1", name="get_weather", input={"city": "Zurich"})]
+
+        result = AiAgent._flatten_content(content)
+
+        assert "get_weather" in result
+        assert "Zurich" in result
+
+    def test_flattens_a_tool_result_dict(self):
+        content = [{"type": "tool_result", "tool_use_id": "call_1", "content": "sunny"}]
+
+        result = AiAgent._flatten_content(content)
+
+        assert "sunny" in result
+
+    def test_flattens_mixed_text_and_tool_use_in_one_turn(self):
+        content = [
+            SimpleNamespace(type="text", text="Let me check."),
+            SimpleNamespace(type="tool_use", id="call_1", name="get_weather", input={"city": "Zurich"}),
+        ]
+
+        result = AiAgent._flatten_content(content)
+
+        assert "Let me check." in result
+        assert "get_weather" in result
+
+
+class TestSummarizationWithToolBlocksInMemory:
+    """End-to-end: a memory containing the shapes the tool loop actually produces
+    (an assistant tool_use turn, a user tool_result turn) must summarize without
+    raising - not just the isolated flattening helper above."""
+
+    def test_does_not_raise_when_a_tool_turn_falls_in_the_summarized_portion(self, agent):
+        tool_turn = [
+            {"role": "user", "content": "weather?"},
+            {"role": "assistant", "content": [SimpleNamespace(type="tool_use", id="call_1", name="get_weather", input={"city": "Zurich"})]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "sunny"}]},
+            {"role": "assistant", "content": "It's sunny."},
+        ]
+        # tool_turn (4 msgs) + memory_of(4) (8 msgs) = 12 > threshold (10); KEEP=2 keeps
+        # the last 4 messages, so tool_turn lands in the summarized portion, not the kept tail.
+        agent._AiAgent__memory = tool_turn + memory_of(4)
+
+        agent._check_memory_for_summary()  # must not raise TypeError
+
+        agent.ask_claude.assert_called_once()
+        prompt_text = agent.ask_claude.call_args.args[0][0]["content"]
+        assert "get_weather" in prompt_text
+        assert "sunny" in prompt_text
+
+
 class TestMultipleSummarizationCycles:
     def test_repeated_summarization_keeps_working(self, agent):
         agent._AiAgent__memory = memory_of(6)

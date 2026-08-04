@@ -22,6 +22,7 @@ AIagent repo                              portfolio-lifecycle-simulator repo
 | Decision | Choice | Why |
 |---|---|---|
 | CV + career plan | Static context in the system prompt | It is both the subject of the conversation and the frame for every answer — small, always relevant, never changes mid-session. As a tool the model must *decide* to fetch it, often won't, and burns a round-trip. Not MCP Resources either — indirection with no payoff for local files read by a single client. |
+| Financial position and goals | Not static context, not a document — a live tool call | The target portfolio value and the assumptions behind it (withdrawal rate, confidence, tax treatment) are computed by the simulator from hypotheses that already live as config in `portfolio-lifecycle-simulator`. A docx here would duplicate that and go stale the moment an assumption changes there — see Phase 3. |
 | Simulator server location | `portfolio-lifecycle-simulator` repo | The server wraps that engine and versions with it; anyone cloning the simulator can drive it conversationally. |
 | Sheets server location | This repo | No other consumer; it is a capability of this agent, not of the engine. |
 | Transport | stdio, both servers | Local, single user, client spawns each as a subprocess. No ports, no auth layer. HTTP only earns its complexity when something remote must reach the server. |
@@ -34,65 +35,42 @@ AIagent repo                              portfolio-lifecycle-simulator repo
 
 Blocked by: nothing. This is the risky part and it is testable in isolation.
 
-- [ ] `ToolExecutor` protocol — `(name, arguments) -> str`. The loop depends on
+- [x] `ToolExecutor` protocol — `(name, arguments) -> str`. The loop depends on
       this, not on MCP, so the transport can be swapped and tested with a plain
-      function.
-- [ ] Agentic loop: call → if `stop_reason == "tool_use"`, execute each requested
+      function. `src/agent.py::ToolExecutor`.
+- [x] Agentic loop: call → if `stop_reason == "tool_use"`, execute each requested
       tool, append a `tool_result` message, call again → repeat until `end_turn`.
-- [ ] `max_tool_iterations` guard so a confused model cannot loop forever.
-- [ ] **Memory rollback.** Current code calls `self.__memory.pop()` in each
-      `except` branch, which works only because append and call are adjacent. A
-      tool turn appends several messages (assistant `tool_use`, user
-      `tool_result`, …); one `pop()` leaves a `tool_use` without its matching
-      `tool_result`, which the API rejects. Fix: snapshot `len(memory)` at the
-      start of the turn, truncate back to it on any failure.
-- [ ] **Summarization must handle block content.** `_check_memory_for_summary`
-      concatenates `message["content"]` as a string; once tool blocks are in
-      memory that content is a *list* and this raises `TypeError`. Add a
-      flattening helper.
-- [ ] Summarization calls must not offer tools (`use_tools=False`), or the
-      summarizer may try to call one.
-- [ ] Tests: mock executor, multi-round tool turn, rollback on mid-loop failure,
-      iteration cap.
+      `AiAgent._check_tool_calls`.
+- [x] `max_tool_iterations` guard so a confused model cannot loop forever.
+- [x] **Memory rollback.** Fixed: `run()` now snapshots `len(memory)` at the start
+      of each turn and truncates back to it on any failure, instead of the old
+      `self.__memory.pop()` which only removed the last message — broken the
+      moment a tool turn appends several (assistant `tool_use`, user
+      `tool_result`, …).
+- [x] **Summarization must handle block content.** Fixed: `AiAgent._flatten_content`
+      renders a message's content as plain text whether it's a string, a list of
+      raw SDK content blocks (an assistant tool_use turn), or a list of the plain
+      dicts this class builds itself (a tool_result turn) — `_check_memory_for_summary`
+      previously concatenated `message["content"]` directly and raised `TypeError`
+      the moment a tool turn survived long enough to be summarized.
+- [x] Summarization calls must not offer tools (`use_tools=False`) — `ask_claude`
+      takes a `use_tools` flag; `_check_memory_for_summary` sets it False.
+- [x] Tests: mock executor, multi-round tool turn, rollback on mid-loop failure,
+      iteration cap, two distinctly-named mock tools proving the loop selects
+      between them rather than just calling the one tool available, and a memory
+      containing tool_use/tool_result blocks summarizing without raising —
+      `tests/test_agent.py::TestRunToolLoop`,
+      `tests/test_check_memory_for_summary.py::TestFlattenContent` /
+      `TestSummarizationWithToolBlocksInMemory`.
 
-## Phase 2 — Static context
+**Done.** A plain Python function — no MCP, no transport — can be passed as
+`tool_executor` and the agent completes a multi-round, multi-tool conversation
+with it, tests green.
 
-Blocked by: nothing.
+## Phase 2 — Sheets MCP server (first real server)
 
-- [x] CV and career plan: parsed directly from `.docx` files in `data/personal/`
-      (gitignored) on every agent startup — `src/context.py::load_personal_context`
-      globs the directory, walks paragraphs *and tables* in document order, maps
-      Heading 1/2/3 styles to markdown, renders tables as markdown pipe tables,
-      concatenates one section per file. Superseded the original
-      `context/profile.md` plan below: the source documents get edited often,
-      and a hand-curated copy would drift out of sync with them. Parsing costs
-      milliseconds, once, at process start, so "static context" still holds —
-      it just gets read fresh each run instead of hand-copied once. A missing
-      or unreadable file is skipped with a warning, never crashes startup.
-      `context.example.md` now documents how to structure the source documents
-      (use real Heading styles, put tabular data in actual tables) instead of
-      being a markdown template to fill in.
-      Fixed post-launch: the first version read `document.paragraphs` only —
-      python-docx keeps table content in a separate `document.tables`
-      collection, so every table (salary bands, timelines) was silently
-      dropped with no error. Table-aware, order-preserving extraction fixed it.
-- [ ] Financial position and goals, public GitHub portfolio, how I want to be
-      advised — are not covered by the CV/career-plan docx files and still need
-      a source. Decide whether that's a small curated file or folds into the
-      system prompt directly.
-- [ ] Public portfolio section is a dated **snapshot**, not live data. A GitHub
-      API tool would add a dependency and a round-trip to fetch something that
-      changes monthly; what matters for career conversations is what each repo
-      *demonstrates*, not its star count. Revisit only if staleness bites.
-- [x] Load at startup into the system prompt.
-- [ ] Prompt caching (`cache_control: ephemeral`) — the block is resent every
-      turn otherwise.
-- [x] Tests: agent runs with the context file absent (falls back cleanly).
-
-## Phase 3 — Sheets MCP server (first real server)
-
-Blocked by: nothing — deliberately built before the simulator server, which has a
-dependency.
+Blocked by: nothing. Built first because it has no cross-repo dependency at
+all — even Phase 3's minimal version needs to shell out to another repo's CLI.
 
 - [ ] stdio MCP server in this repo.
 - [ ] Auth: **service account, not OAuth user flow**. Create the service account,
@@ -101,20 +79,50 @@ dependency.
       Key in `.secrets/` (gitignored).
 - [ ] Tools: `read_portfolio_development()`, `read_dashboard()`. Both sheets are
       already summary-level, so each returns its sheet whole.
+- [ ] **Resource**: sheet metadata (last updated, column schema). Resources are
+      *application*-controlled where tools are *model*-controlled — implementing
+      both is the only way to internalise that distinction.
+- [ ] **Prompt**: a "monthly review" template. User-controlled, the third
+      primitive.
+- [ ] Client exercises the full lifecycle, not just `call_tool`: initialize
+      handshake, capability negotiation, `list_tools` / `list_resources` /
+      `list_prompts`, then invocation.
+- [ ] Error paths, deliberately: tool raises, server dies mid-session,
+      malformed arguments from the model. This is where the agent will actually
+      break, and where understanding shows.
+
+*Why more than the minimum:* a client plus one tool-serving server demonstrates
+roughly 40% of MCP's surface. Covering all three primitives, the lifecycle and
+the failure modes costs about a day more and is the difference between "I made a
+tool work" and knowing the protocol — which matters for the certification this
+work doubles as preparation for.
 - [ ] Tests: mocked Sheets client; server starts and lists tools; no network.
 
-## Phase 4 — Simulator MCP server
+## Phase 3 — Simulator MCP server
 
-Blocked by: the engine must expose structured output — `--json`, `--fast`,
-section selection and `--record` gating (see that repo's `CLAUDE.md` §3).
+Blocked by: nothing, for a **minimal version** — shell out to whatever the
+engine already prints today (even unstructured) and return it as-is via a
+single tool, e.g. `get_last_summary()`. Claude can work with loosely-structured
+text; it just costs more tokens and can't reliably explain *why* a result came
+out as it did until the structured version lands. The **full version**
+(`--json`, `--fast`, section selection, `--record` gating — see that repo's
+`CLAUDE.md` §3) is blocked on that refactor in the sibling repo; upgrade to it
+once available rather than waiting for it to start.
 
-- [ ] Tools: `run_plan_check(overrides)`, `get_last_summary()`,
+This is also where financial position and goals comes from — not a document.
+The target portfolio value and the assumptions behind it (withdrawal rate,
+confidence, tax treatment) are computed here from hypotheses that already live
+as config in `portfolio-lifecycle-simulator`; see the decision table above.
+
+- [ ] Minimal version: shell out to the simulator's current CLI output, return
+      it as-is via one tool.
+- [ ] Full version — tools: `run_plan_check(overrides)`, `get_last_summary()`,
       `get_run_history()`.
 - [ ] Whitelist the ~12 overridable parameters at the tool boundary, not in the
       CLI.
 - [ ] Return *why* a result came out as it did — binding constraint, chosen
       allocation, whether the search hit its bounds — so the model can reason
-      about the next call instead of guessing.
+      about the next call instead of guessing. Needs the structured output.
 
 ### Open question — latency may change the tool contract
 
@@ -123,12 +131,19 @@ If reduced runs still exceed ~30s, `run_plan_check` cannot stay synchronous and
 becomes `start_run()` → `get_result(job_id)` polling, which is a materially
 different contract. Decide with a measurement, not a guess.
 
-## Phase 5 — Packaging
+## Phase 4 — Packaging
 
 - [ ] CI workflow (`pytest` on push) — this repo has none yet.
 - [ ] README: architecture, quickstart, example transcript showing the agent
       calling tools.
 - [ ] Demo path: one command answering a real question end to end.
+- [ ] Public GitHub portfolio: `data/personal/Public_Portfolio_*.docx` with a
+      `Repo | What it is | What it demonstrates` table — same
+      `load_personal_context()` mechanism as the CV/career plan, no code
+      change needed. A dated **snapshot**, not live data, deliberately: a
+      GitHub API tool would add a dependency and a round-trip for something
+      that changes monthly, when what matters for career conversations is what
+      each repo *demonstrates*, not its star count.
 
 ---
 
