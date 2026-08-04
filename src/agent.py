@@ -5,13 +5,15 @@ import anthropic
 
 
 class ToolExecutor(Protocol):
-    """A callable that executes one tool call and returns its result as a string.
+    """An async callable that executes one tool call and returns its result as a string.
 
     Depending only on this signature - not on MCP - lets the tool loop be built and
     tested with a plain function, and the transport swapped in later without touching it.
+    Async because the real implementation, McpClient.call_tool, talks to a subprocess
+    over stdio; the whole agent is async so awaiting it doesn't block the chat loop.
     """
 
-    def __call__(self, name: str, arguments: dict) -> str: ...
+    async def __call__(self, name: str, arguments: dict) -> str: ...
 
 
 class AiAgent:
@@ -32,7 +34,7 @@ class AiAgent:
         tool_executor: ToolExecutor | None = None,
         max_tool_iterations: int = 10,
     ) -> None:
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model: str = model
         # cache_control marks the system prompt for prompt caching: it is a few thousand
         # tokens (role text + parsed CV/career-plan docx) and identical on every turn, so
@@ -51,7 +53,7 @@ class AiAgent:
         self._max_tool_iterations: int = max_tool_iterations
         self.__memory: list[dict] = []
 
-    def ask_claude(
+    async def ask_claude(
         self,
         input_prompt: list[dict],
         print_stream: bool = False,
@@ -68,15 +70,15 @@ class AiAgent:
         :return: the full accumulated LLM model response.
         """
         tools_kwargs = {"tools": self._tools} if (use_tools and self._tools) else {}
-        with self.client.messages.stream(model=self._model,
-                                          max_tokens=max_tokens if max_tokens is not None else self._max_tokens,
-                                          messages=input_prompt,
-                                          **self._system_prompt_kwargs,
-                                          **tools_kwargs) as stream:
-            for text in stream.text_stream:
+        async with self.client.messages.stream(model=self._model,
+                                                max_tokens=max_tokens if max_tokens is not None else self._max_tokens,
+                                                messages=input_prompt,
+                                                **self._system_prompt_kwargs,
+                                                **tools_kwargs) as stream:
+            async for text in stream.text_stream:
                 if print_stream:
                     print(text, end="", flush=True)
-            return stream.get_final_message()
+            return await stream.get_final_message()
 
 
     @staticmethod
@@ -132,7 +134,7 @@ class AiAgent:
         """
         self.__memory.append({"role": "assistant", "content": content})
 
-    def _check_tool_calls(self, agent_response: anthropic.types.Message) -> anthropic.types.Message:
+    async def _check_tool_calls(self, agent_response: anthropic.types.Message) -> anthropic.types.Message:
         """
         While `agent_response` requests tool calls, execute each via `tool_executor`,
         append the assistant's tool_use turn and the resulting tool_result turn to memory,
@@ -152,17 +154,17 @@ class AiAgent:
                 {
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": self._tool_executor(block.name, block.input),
+                    "content": await self._tool_executor(block.name, block.input),
                 }
                 for block in agent_response.content
                 if block.type == "tool_use"
             ]
             self.__add_user_message(tool_results)
-            agent_response = self.ask_claude(self.__memory, print_stream=True)
+            agent_response = await self.ask_claude(self.__memory, print_stream=True)
 
         return agent_response
 
-    def _check_memory_for_summary(self) -> None:
+    async def _check_memory_for_summary(self) -> None:
         """
         Once the conversation grows past COUNT_OF_ANSWERS_TO_SUMMARIZE answers beyond the
         kept tail, summarize everything except the last COUNT_OF_ANSWERS_TO_KEEP_AFTER_SUMMARY
@@ -184,7 +186,7 @@ class AiAgent:
             for message in to_summarize:
                 prompt += "Role: " + message["role"] + ": " + self._flatten_content(message["content"]) + "\n"
 
-            summary_response = self.ask_claude(
+            summary_response = await self.ask_claude(
                 [{"role": "user", "content": prompt}],
                 max_tokens=self._summary_max_tokens,
                 use_tools=False,
@@ -195,13 +197,13 @@ class AiAgent:
             self.__memory = [summary_message] + to_keep
 
 
-    def run(self) -> None:
+    async def run(self) -> None:
         """Run the interactive chat loop until the user exits."""
 
         while True:
 
             # Check if conversation is too long and must be summarized
-            self._check_memory_for_summary()
+            await self._check_memory_for_summary()
 
             # Get the user message
             user_message = input("You: ")
@@ -220,8 +222,8 @@ class AiAgent:
 
             # Call the LLM model via API, executing any tool calls it requests
             try:
-                agent_response = self.ask_claude(self.__memory, print_stream=True)
-                agent_response = self._check_tool_calls(agent_response)
+                agent_response = await self.ask_claude(self.__memory, print_stream=True)
+                agent_response = await self._check_tool_calls(agent_response)
             except anthropic.RateLimitError as e:
                 self.__memory = self.__memory[:turn_start]
                 retry_after = e.response.headers.get("retry-after", "a few")

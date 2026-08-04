@@ -1,9 +1,12 @@
 """Tests for AiAgent.extract_text and AiAgent.run.
 
 ask_claude is always mocked - these tests never hit the real Anthropic API.
+AiAgent is async (it awaits McpClient tool calls), so ask_claude is an
+AsyncMock and every agent.run() call runs under asyncio.run(...).
 """
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -28,7 +31,7 @@ def make_tool_use_message(calls: list[tuple[str, str, dict]] | None = None) -> S
 @pytest.fixture
 def agent() -> AiAgent:
     a = AiAgent(api_key="sk-ant-test-key-not-real")
-    a.ask_claude = MagicMock()
+    a.ask_claude = AsyncMock()
     return a
 
 
@@ -80,7 +83,7 @@ class TestRunMemoryOnFailure:
         agent.ask_claude.side_effect = anthropic.RateLimitError("rate limited", response=response, body=None)
         self._queue_inputs(monkeypatch, ["hi", "exit"])
 
-        agent.run()
+        asyncio.run(agent.run())
 
         assert agent._AiAgent__memory == []
 
@@ -89,7 +92,7 @@ class TestRunMemoryOnFailure:
         agent.ask_claude.side_effect = anthropic.APIConnectionError(request=request)
         self._queue_inputs(monkeypatch, ["hi", "exit"])
 
-        agent.run()
+        asyncio.run(agent.run())
 
         assert agent._AiAgent__memory == []
 
@@ -99,7 +102,7 @@ class TestRunMemoryOnFailure:
         agent.ask_claude.side_effect = anthropic.APIStatusError("boom", response=response, body=None)
         self._queue_inputs(monkeypatch, ["hi", "exit"])
 
-        agent.run()
+        asyncio.run(agent.run())
 
         assert agent._AiAgent__memory == []
 
@@ -107,7 +110,7 @@ class TestRunMemoryOnFailure:
         agent.ask_claude.return_value = make_text_message("hello back")
         self._queue_inputs(monkeypatch, ["hi", "exit"])
 
-        agent.run()
+        asyncio.run(agent.run())
 
         assert agent._AiAgent__memory == [
             {"role": "user", "content": "hi"},
@@ -128,7 +131,7 @@ class TestRunToolLoop:
     def test_selects_between_two_distinct_tools_then_answers(self, monkeypatch):
         calls_made = []
 
-        def tool_executor(name: str, arguments: dict) -> str:
+        async def tool_executor(name: str, arguments: dict) -> str:
             calls_made.append((name, arguments))
             return f"{name} result"
 
@@ -137,7 +140,7 @@ class TestRunToolLoop:
             tools=[{"name": "get_weather"}, {"name": "get_stock_price"}],
             tool_executor=tool_executor,
         )
-        a.ask_claude = MagicMock()
+        a.ask_claude = AsyncMock()
         a.ask_claude.side_effect = [
             make_tool_use_message([("call_1", "get_weather", {"city": "Zurich"})]),
             make_tool_use_message([("call_2", "get_stock_price", {"ticker": "NESN"})]),
@@ -145,7 +148,7 @@ class TestRunToolLoop:
         ]
         self._queue_inputs(monkeypatch, ["weather and stock?", "exit"])
 
-        a.run()
+        asyncio.run(a.run())
 
         assert calls_made == [("get_weather", {"city": "Zurich"}), ("get_stock_price", {"ticker": "NESN"})]
         assert a._AiAgent__memory[-1] == {"role": "assistant", "content": "Sunny, and NESN is at 95."}
@@ -154,16 +157,16 @@ class TestRunToolLoop:
         a = AiAgent(
             api_key="sk-ant-test-key-not-real",
             tools=[{"name": "get_weather"}],
-            tool_executor=lambda name, arguments: "sunny",
+            tool_executor=AsyncMock(return_value="sunny"),
         )
-        a.ask_claude = MagicMock()
+        a.ask_claude = AsyncMock()
         a.ask_claude.side_effect = [
             make_tool_use_message([("call_xyz", "get_weather", {"city": "Zurich"})]),
             make_text_message("It's sunny."),
         ]
         self._queue_inputs(monkeypatch, ["weather?", "exit"])
 
-        a.run()
+        asyncio.run(a.run())
 
         tool_result_message = a._AiAgent__memory[2]
         assert tool_result_message == {
@@ -174,12 +177,12 @@ class TestRunToolLoop:
     def test_stops_after_max_tool_iterations(self, monkeypatch, capsys):
         calls_made = []
 
-        def tool_executor(name: str, arguments: dict) -> str:
+        async def tool_executor(name: str, arguments: dict) -> str:
             calls_made.append(name)
             return "still going"
 
         # A confused model that keeps requesting the same tool forever, if not capped.
-        def always_requests_a_tool(*args, **kwargs):
+        async def always_requests_a_tool(*args, **kwargs):
             return make_tool_use_message([("call", "loop_tool", {})])
 
         a = AiAgent(
@@ -188,10 +191,10 @@ class TestRunToolLoop:
             tool_executor=tool_executor,
             max_tool_iterations=3,
         )
-        a.ask_claude = MagicMock(side_effect=always_requests_a_tool)
+        a.ask_claude = AsyncMock(side_effect=always_requests_a_tool)
         self._queue_inputs(monkeypatch, ["loop please", "exit"])
 
-        a.run()
+        asyncio.run(a.run())
 
         assert len(calls_made) == 3
         assert "[stopped after 3 tool calls]" in capsys.readouterr().out
@@ -200,11 +203,11 @@ class TestRunToolLoop:
         a = AiAgent(
             api_key="sk-ant-test-key-not-real",
             tools=[{"name": "get_weather"}],
-            tool_executor=lambda name, arguments: "sunny",
+            tool_executor=AsyncMock(return_value="sunny"),
         )
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
         response = httpx.Response(500, request=request)
-        a.ask_claude = MagicMock()
+        a.ask_claude = AsyncMock()
         a.ask_claude.side_effect = [
             make_text_message("hi there"),                                          # turn 1: plain answer, no tools
             make_tool_use_message([("call_1", "get_weather", {"city": "Zurich"})]),  # turn 2: requests a tool...
@@ -212,7 +215,7 @@ class TestRunToolLoop:
         ]
         self._queue_inputs(monkeypatch, ["hi", "weather?", "exit"])
 
-        a.run()
+        asyncio.run(a.run())
 
         # Turn 1's messages survive; turn 2's user question and the assistant's
         # tool_use turn it triggered are both rolled back, not just the last one.

@@ -15,7 +15,7 @@ from mcp.client.stdio import stdio_client
 
 SHEETS_SERVER_SCRIPT = Path(__file__).resolve().parent / "sheets_server.py"
 
-
+# Async server: it can listen while waiting for the answer
 class McpClient:
     """
     One live connection to one MCP server subprocess. An async context manager:

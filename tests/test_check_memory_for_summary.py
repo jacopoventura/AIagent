@@ -5,9 +5,12 @@ parameters (SUMMARIZE=3, KEEP=2) instead of the real defaults (50/10), so
 each test only needs a handful of messages to reach the trigger condition.
 
 ask_claude is always mocked - these tests never hit the real Anthropic API.
+_check_memory_for_summary is async (AiAgent awaits ask_claude), so ask_claude
+is an AsyncMock and every call runs under asyncio.run(...).
 """
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -43,7 +46,7 @@ def agent() -> AiAgent:
         count_of_answers_to_summarize=3,
         count_of_answers_to_keep_after_summary=2,
     )
-    a.ask_claude = MagicMock(return_value=make_message("mocked summary text"))
+    a.ask_claude = AsyncMock(return_value=make_message("mocked summary text"))
     return a
 
 
@@ -53,7 +56,7 @@ class TestTriggerCondition:
     def test_empty_memory_does_not_crash_or_summarize(self, agent):
         agent._AiAgent__memory = []
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         assert agent._AiAgent__memory == []
         agent.ask_claude.assert_not_called()
@@ -62,7 +65,7 @@ class TestTriggerCondition:
         agent._AiAgent__memory = memory_of(4)  # 4 <= 5
         original = list(agent._AiAgent__memory)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         assert agent._AiAgent__memory == original
         agent.ask_claude.assert_not_called()
@@ -72,7 +75,7 @@ class TestTriggerCondition:
         agent._AiAgent__memory = memory_of(5)
         original = list(agent._AiAgent__memory)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         assert agent._AiAgent__memory == original
         agent.ask_claude.assert_not_called()
@@ -80,7 +83,7 @@ class TestTriggerCondition:
     def test_one_pair_over_threshold_triggers(self, agent):
         agent._AiAgent__memory = memory_of(6)  # 6 > 5
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         agent.ask_claude.assert_called_once()
 
@@ -91,7 +94,7 @@ class TestSummaryResult:
     def test_result_length_is_summary_plus_kept_tail(self, agent):
         agent._AiAgent__memory = memory_of(6)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         # 1 summary message + KEEP*2 = 1 + 4 = 5
         assert len(agent._AiAgent__memory) == 5
@@ -99,7 +102,7 @@ class TestSummaryResult:
     def test_summary_message_shape(self, agent):
         agent._AiAgent__memory = memory_of(6)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         summary_message = agent._AiAgent__memory[0]
         assert summary_message["role"] == "user"
@@ -109,7 +112,7 @@ class TestSummaryResult:
         agent._AiAgent__memory = memory_of(6)
         original = list(agent._AiAgent__memory)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         assert agent._AiAgent__memory[1:] == original[-4:]
 
@@ -118,7 +121,7 @@ class TestSummaryResult:
         # (a previous bug dropped exactly this turn).
         agent._AiAgent__memory = memory_of(6)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         new_memory = agent._AiAgent__memory
         assert new_memory[-2] == {"role": "user", "content": "Question 5"}
@@ -128,7 +131,7 @@ class TestSummaryResult:
         # Regression test: an earlier bug summarized and kept the same messages.
         agent._AiAgent__memory = memory_of(6)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         kept_contents = {m["content"] for m in agent._AiAgent__memory[1:]}
         assert "Question 0" not in kept_contents
@@ -139,7 +142,7 @@ class TestAskClaudeCallShape:
     def test_summary_prompt_sent_as_single_user_message(self, agent):
         agent._AiAgent__memory = memory_of(6)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         sent_messages = agent.ask_claude.call_args.args[0]
         assert isinstance(sent_messages, list)
@@ -151,7 +154,7 @@ class TestAskClaudeCallShape:
         agent._AiAgent__memory = memory_of(6)
         original = list(agent._AiAgent__memory)
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         prompt_text = agent.ask_claude.call_args.args[0][0]["content"]
         for message in original[:-4]:  # summarized: pairs 0-3
@@ -167,7 +170,7 @@ class TestErrorHandling:
         agent.ask_claude.side_effect = RuntimeError("boom")
 
         with pytest.raises(RuntimeError):
-            agent._check_memory_for_summary()
+            asyncio.run(agent._check_memory_for_summary())
 
         # Memory must not be partially mutated when the API call fails.
         assert agent._AiAgent__memory == original
@@ -229,7 +232,7 @@ class TestSummarizationWithToolBlocksInMemory:
         # the last 4 messages, so tool_turn lands in the summarized portion, not the kept tail.
         agent._AiAgent__memory = tool_turn + memory_of(4)
 
-        agent._check_memory_for_summary()  # must not raise TypeError
+        asyncio.run(agent._check_memory_for_summary())  # must not raise TypeError
 
         agent.ask_claude.assert_called_once()
         prompt_text = agent.ask_claude.call_args.args[0][0]["content"]
@@ -240,7 +243,7 @@ class TestSummarizationWithToolBlocksInMemory:
 class TestMultipleSummarizationCycles:
     def test_repeated_summarization_keeps_working(self, agent):
         agent._AiAgent__memory = memory_of(6)
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
         assert len(agent._AiAgent__memory) == 5
 
         # Grow memory again past threshold and summarize a second time.
@@ -249,7 +252,7 @@ class TestMultipleSummarizationCycles:
         agent._AiAgent__memory.extend(make_pair(102))
         # len = 5 + 6 = 11 -> 5.5 pairs > 5, triggers again.
 
-        agent._check_memory_for_summary()
+        asyncio.run(agent._check_memory_for_summary())
 
         assert len(agent._AiAgent__memory) == 5
         assert agent.ask_claude.call_count == 2
