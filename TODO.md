@@ -93,12 +93,34 @@ all — even Phase 3's minimal version needs to shell out to another repo's CLI.
       value and structure (via the tools above) for when the user wants to
       discuss the portfolio alone, not the combined career+financial problem.
       User-controlled, the third primitive.
-- [ ] Client exercises the full lifecycle, not just `call_tool`: initialize
-      handshake, capability negotiation, `list_tools` / `list_resources` /
-      `list_prompts`, then invocation.
-- [ ] Error paths, deliberately: tool raises, server dies mid-session,
-      malformed arguments from the model. This is where the agent will actually
-      break, and where understanding shows.
+- [x] Client exercises the lifecycle, not just `call_tool`: `main.py` opens
+      `McpClient` as `async with` (spawn + `initialize` handshake), calls
+      `list_tools()`, wires the result straight into `AiAgent(tools=...,
+      tool_executor=client.call_tool)`. Verified end-to-end: real subprocess,
+      real tool call, real data back. `list_prompts` isn't exercised yet -
+      no prompt exists until the item below lands; `list_resources` no longer
+      applies (Resources were dropped, see above).
+- [x] Error paths, deliberately: tool raises, server dies mid-session,
+      malformed arguments from the model. Probed the SDK empirically (not
+      guessed) to find both are already the *same* shape at the transport
+      level: a tool that raised, got bad arguments, or doesn't exist is a
+      normal MCP response - `CallToolResult.is_error` - and `McpClient.call_tool`
+      already turned it into `[tool error] ...` text for the model to reason
+      about. A dead connection (server process killed mid-session, or fails to
+      start) is different: it raises `mcp.shared.exceptions.MCPError`, which the
+      model can't reason about, so `McpClient.call_tool` now catches it and
+      re-raises the transport-agnostic `agent.py::ToolExecutorError` - kept in
+      `agent.py`, not `mcp_client.py`, for the same reason `ToolExecutor` lives
+      there: the agent must not import anything MCP-specific. `AiAgent.run()`
+      catches it exactly like an Anthropic API error - roll back the turn,
+      inform the user, keep the session alive. Note: no reconnect - a dead
+      connection stays dead for the rest of the session, since `main.py` opens
+      it once for the whole run; acceptable for a single-user CLI, would need
+      revisiting for anything longer-lived.
+      Tests: `tests/test_mcp_client.py` (mocked ClientSession - is_error vs.
+      ToolExecutorError), `tests/test_agent.py::TestRunToolLoop::
+      test_dead_mcp_connection_rolls_back_the_failed_turn`,
+      `tests/test_sheets_server.py::TestToolRaisesPropagatesNotSwallowed`.
 
 *Why more than the minimum:* a client plus one tool-serving server demonstrates
 roughly 40% of MCP's surface. Covering tools and prompts properly, the full

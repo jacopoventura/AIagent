@@ -3,6 +3,9 @@ data - an Anthropic-format tool list and a string-returning call - so the tool
 loop in agent.py never has to know MCP exists. Mirrors the reason `ToolExecutor`
 in agent.py depends only on a `(name, arguments) -> str` signature: transport
 stays swappable and testable in isolation.
+NOTE: this is just a connection interface between agent, which must be asynchronous,
+and any of the mcp_servers where the tools are defined.
+That's why mcp_client.py must be generalistic to be able to run with any mcp_server.
 """
 import asyncio
 import sys
@@ -12,6 +15,9 @@ from types import TracebackType
 
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
+from mcp.shared.exceptions import MCPError
+
+from src.agent import ToolExecutorError
 
 SHEETS_SERVER_SCRIPT = Path(__file__).resolve().parent / "sheets_server.py"
 
@@ -64,12 +70,25 @@ class McpClient:
         """
         Execute one tool call and flatten its result to text - the shape
         AiAgent's `ToolExecutor` protocol expects.
+
+        Two distinct failure shapes reach here, handled differently. A tool that
+        raised, was passed malformed arguments, or doesn't exist is still a normal
+        MCP response - the server reports it via CallToolResult.is_error, and it
+        becomes tool_result text the model can reason about. A dead connection
+        (server crashed, process killed) is not something the model can reason
+        about, so it's raised as ToolExecutorError instead - a whole-turn failure
+        for AiAgent.run() to handle, same as an Anthropic API error.
         :param name: tool name, as returned by list_tools().
         :param arguments: tool arguments, as decided by the model.
         :return: concatenated text content; prefixed with "[tool error]" if the
                  server reported failure rather than raising a transport error.
+        :raises ToolExecutorError: if the connection itself fails (e.g. the server
+                 process died mid-session) rather than the tool call completing.
         """
-        result = await self._require_session().call_tool(name, arguments)
+        try:
+            result = await self._require_session().call_tool(name, arguments)
+        except MCPError as e:
+            raise ToolExecutorError(f"MCP connection failed calling '{name}': {e}") from e
         text = "\n".join(block.text for block in result.content if isinstance(block, types.TextContent))
         return f"[tool error] {text}" if result.is_error else text
 

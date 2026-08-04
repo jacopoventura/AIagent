@@ -7,6 +7,7 @@ a targeted carve-out in hooks/privacy-guard.sh - see that file for why it's safe
 to commit where a real personal .docx never would be.
 """
 import shutil
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -196,3 +197,14 @@ class TestGeneratePersonalCareerAndFinancePlan:
         result = generate_personal_career_and_finance_plan()
 
         assert "# Personal context" not in result
+
+    def test_includes_todays_date_for_date_relative_reasoning(self, monkeypatch):
+        """Regression coverage: the career plan states milestones as target years
+        ("age 49 by 2036"), not a current age, so the model needs today's date to
+        derive one - without it, it silently guesses and gets it wrong."""
+        monkeypatch.setattr("src.context.load_personal_context", lambda: "")
+        monkeypatch.setattr("src.context.date", SimpleNamespace(today=lambda: date(2026, 8, 4)))
+
+        result = generate_personal_career_and_finance_plan()
+
+        assert "2026-08-04" in result

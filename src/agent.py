@@ -16,6 +16,17 @@ class ToolExecutor(Protocol):
     async def __call__(self, name: str, arguments: dict) -> str: ...
 
 
+class ToolExecutorError(Exception):
+    """Raised by a ToolExecutor when the transport itself fails - e.g. the MCP server
+    process died mid-session - as opposed to the tool running and reporting failure
+    normally, which is just ordinary tool_result text, not an exception (the model
+    can reason about "the tool said X went wrong"; it cannot reason about "the pipe
+    to the tool closed", so that case is surfaced as a whole-turn failure instead).
+    Kept here, not in mcp_client.py, for the same reason as ToolExecutor itself:
+    agent.py must not import anything MCP-specific, and any transport can raise it.
+    """
+
+
 class AiAgent:
     """
     Orchestrator of the AI agent: holds the Claude client and runs the chat loop.
@@ -143,6 +154,9 @@ class AiAgent:
         :return: the first response with a stop_reason other than "tool_use".
         """
         iterations = 0
+
+        # If a tool is available, the agent message can have stop_reason == "tool_use" instead of only "end_turn",
+        # and its content includes tool_use blocks.
         while agent_response.stop_reason == "tool_use":
             if iterations >= self._max_tool_iterations:
                 print(f"\n[stopped after {self._max_tool_iterations} tool calls]")
@@ -236,6 +250,10 @@ class AiAgent:
             except anthropic.APIStatusError as e:
                 self.__memory = self.__memory[:turn_start]
                 print(f"Claude API error ({e.status_code}): {e.message}")
+                continue
+            except ToolExecutorError as e:
+                self.__memory = self.__memory[:turn_start]
+                print(f"Tool connection error: {e}. Please try again.")
                 continue
 
             final_response = self.extract_text(agent_response)

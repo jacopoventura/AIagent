@@ -27,6 +27,14 @@ def mock_values(monkeypatch, rows: list[list[str]]):
     monkeypatch.setattr(sheets_server, "_SHEETS_VALUES", stub)
 
 
+def mock_values_raising(monkeypatch, exception: Exception):
+    """Replace `_SHEETS_VALUES` with a stub whose .get(...) raises `exception`."""
+    def raise_it(self, spreadsheetId, range):
+        raise exception
+    stub = type("StubValues", (), {"get": raise_it})()
+    monkeypatch.setattr(sheets_server, "_SHEETS_VALUES", stub)
+
+
 class TestServerRegistersTools:
     def test_lists_both_tools_by_name(self):
         tools = asyncio.run(sheets_server.server.list_tools())
@@ -76,3 +84,23 @@ class TestToolsReadTheConfiguredTab:
         result = read_networth_overview()
 
         assert "Broker" in result
+
+
+class TestToolRaisesPropagatesNotSwallowed:
+    """A raised exception is what lets the MCP layer report the failure to the
+    model as a normal tool_result (verified end-to-end against a real subprocess
+    session, not just MCPServer.call_tool() - the is_error conversion happens in
+    the protocol/session layer, not in MCPServer.call_tool() itself). Our tool
+    functions must never catch-and-swallow, or that reporting never happens."""
+
+    def test_read_portfolio_overview_does_not_swallow_a_sheets_api_failure(self, monkeypatch):
+        mock_values_raising(monkeypatch, RuntimeError("Sheets API is down"))
+
+        with pytest.raises(RuntimeError, match="Sheets API is down"):
+            read_portfolio_overview()
+
+    def test_read_networth_overview_does_not_swallow_a_sheets_api_failure(self, monkeypatch):
+        mock_values_raising(monkeypatch, RuntimeError("Sheets API is down"))
+
+        with pytest.raises(RuntimeError, match="Sheets API is down"):
+            read_networth_overview()

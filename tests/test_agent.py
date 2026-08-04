@@ -12,7 +12,7 @@ import httpx
 import pytest
 import anthropic
 
-from src.agent import AiAgent
+from src.agent import AiAgent, ToolExecutorError
 
 
 def make_text_message(text: str) -> SimpleNamespace:
@@ -219,6 +219,34 @@ class TestRunToolLoop:
 
         # Turn 1's messages survive; turn 2's user question and the assistant's
         # tool_use turn it triggered are both rolled back, not just the last one.
+        assert a._AiAgent__memory == [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hi there"},
+        ]
+
+    def test_dead_mcp_connection_rolls_back_the_failed_turn(self, monkeypatch):
+        """A tool executor whose transport died (e.g. the MCP server process was
+        killed) raises ToolExecutorError - not a normal tool_result - and run()
+        must handle it exactly like an Anthropic API failure: roll back the turn
+        and keep the session alive, not crash the whole chat loop."""
+
+        async def dead_connection(name: str, arguments: dict) -> str:
+            raise ToolExecutorError(f"MCP connection failed calling '{name}': Connection closed")
+
+        a = AiAgent(
+            api_key="sk-ant-test-key-not-real",
+            tools=[{"name": "get_weather"}],
+            tool_executor=dead_connection,
+        )
+        a.ask_claude = AsyncMock()
+        a.ask_claude.side_effect = [
+            make_text_message("hi there"),                                          # turn 1: plain answer, no tools
+            make_tool_use_message([("call_1", "get_weather", {"city": "Zurich"})]),  # turn 2: requests a tool...
+        ]
+        self._queue_inputs(monkeypatch, ["hi", "weather?", "exit"])
+
+        asyncio.run(a.run())
+
         assert a._AiAgent__memory == [
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hi there"},

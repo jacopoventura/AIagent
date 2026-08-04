@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from src.agent import AiAgent
 from src.context import generate_personal_career_and_finance_plan
+from src.mcp_client import McpClient, SHEETS_SERVER_SCRIPT
 
 load_dotenv()
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -13,9 +14,15 @@ if not ANTHROPIC_API_KEY:
     raise SystemExit("API key not provided")
 
 
-if __name__ == '__main__':
-    # No MCP tools wired in yet - see TODO.md Phase 2 "client exercises the full
-    # lifecycle". This just keeps the entrypoint runnable after AiAgent went async.
-    agent = AiAgent(api_key=ANTHROPIC_API_KEY,
-                    system_prompt=generate_personal_career_and_finance_plan())
-    asyncio.run(agent.run())
+async def main() -> None:
+    """Connect to the sheets MCP server and run the interactive chat loop for one session."""
+    async with McpClient(SHEETS_SERVER_SCRIPT) as client:
+        agent = AiAgent(api_key=ANTHROPIC_API_KEY,
+                        system_prompt=generate_personal_career_and_finance_plan(),
+                        tools=await client.list_tools(),
+                        tool_executor=client.call_tool)
+        await agent.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

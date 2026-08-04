@@ -1,6 +1,7 @@
 """Loads personal context (CV, career plan) from local .docx files for the system prompt."""
 import re
 import zipfile
+from datetime import date
 from pathlib import Path
 
 from docx import Document
@@ -94,6 +95,11 @@ def load_personal_context(directory: Path = PERSONAL_DATA_DIR) -> str:
 def generate_personal_career_and_finance_plan() -> str:
     """Generates the system prompt for personal career and finance plan."""
     system_prompt = (
+        f"Today's date is {date.today().isoformat()}. Use it for any date-relative reasoning "
+        "(current age, years remaining to a milestone, time elapsed) - you have no other way to "
+        "know the current date, and the career plan below states milestones as target years "
+        "(\"age 49 by 2036\"), not a current age, so getting this wrong compounds into every "
+        "date-relative answer.\n\n"
         "You are a personal advisor for career and financial planning, treated as one problem: "
         "the user's earnings trajectory determines what their portfolio can become, and their "
         "portfolio target determines what their career must deliver and by when. Always reason "
