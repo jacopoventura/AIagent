@@ -251,3 +251,53 @@ class TestRunToolLoop:
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hi there"},
         ]
+
+
+class TestSlashCommands:
+    """A "/name" input resolves to an MCP prompt via prompt_resolver - the
+    resolved text becomes the turn's content, Claude never sees the literal
+    command. Resolution happens before memory is touched, so a failure here
+    needs no rollback, just a message and the loop continuing to the next input."""
+
+    @staticmethod
+    def _queue_inputs(monkeypatch, inputs: list[str]) -> None:
+        responses = iter(inputs)
+        monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    def test_resolved_prompt_text_replaces_the_literal_command_in_memory(self, monkeypatch):
+        async def prompt_resolver(name: str) -> str:
+            assert name == "portfolio"
+            return "Give me a portfolio review."
+
+        a = AiAgent(api_key="sk-ant-test-key-not-real", prompt_resolver=prompt_resolver)
+        a.ask_claude = AsyncMock(return_value=make_text_message("Here's your review."))
+        self._queue_inputs(monkeypatch, ["/portfolio", "exit"])
+
+        asyncio.run(a.run())
+
+        assert a._AiAgent__memory[0] == {"role": "user", "content": "Give me a portfolio review."}
+
+    def test_no_resolver_configured_prints_message_and_continues(self, monkeypatch, capsys):
+        a = AiAgent(api_key="sk-ant-test-key-not-real")  # no prompt_resolver
+        a.ask_claude = AsyncMock()
+        self._queue_inputs(monkeypatch, ["/portfolio", "exit"])
+
+        asyncio.run(a.run())
+
+        assert a._AiAgent__memory == []
+        a.ask_claude.assert_not_called()
+        assert "/portfolio" in capsys.readouterr().out
+
+    def test_unknown_prompt_prints_message_and_continues_without_touching_memory(self, monkeypatch, capsys):
+        async def failing_resolver(name: str) -> str:
+            raise ToolExecutorError(f"MCP connection failed fetching prompt '{name}': Unknown prompt")
+
+        a = AiAgent(api_key="sk-ant-test-key-not-real", prompt_resolver=failing_resolver)
+        a.ask_claude = AsyncMock()
+        self._queue_inputs(monkeypatch, ["/does_not_exist", "exit"])
+
+        asyncio.run(a.run())
+
+        assert a._AiAgent__memory == []
+        a.ask_claude.assert_not_called()
+        assert "does_not_exist" in capsys.readouterr().out

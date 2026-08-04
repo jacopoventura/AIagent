@@ -95,6 +95,16 @@ def read_networth_overview() -> str:
     return _read_tab(_TABS["networth_overview_tab"])
 
 
+@server.prompt()
+def portfolio() -> str:
+    """Portfolio-only review: value, composition, and unrealized gain - no career planning."""
+    return (
+        "Give me a portfolio-only review: current total portfolio value, its composition "
+        "(allocation across holdings), and unrealized gain, using the portfolio and net-worth "
+        "tools. Stick to the portfolio - don't bring in career planning unless I ask for it."
+    )
+
+
 if __name__ == "__main__":
     _init()
     asyncio.run(server.run_stdio_async())

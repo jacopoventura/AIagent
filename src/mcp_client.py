@@ -92,6 +92,29 @@ class McpClient:
         text = "\n".join(block.text for block in result.content if isinstance(block, types.TextContent))
         return f"[tool error] {text}" if result.is_error else text
 
+    async def get_prompt(self, name: str) -> str:
+        """
+        Fetch a named prompt and flatten its message(s) to text - the shape
+        AiAgent's `PromptResolver` protocol expects, and the turn content that
+        replaces the literal "/name" slash command in run().
+
+        Unlike call_tool, there's no soft "is_error" outcome here: an unknown
+        prompt name is itself a transport-level failure (MCPError), same as a
+        dead connection, so both raise ToolExecutorError - there's no tool_result
+        equivalent for "you asked for a prompt that doesn't exist".
+        :param name: prompt name, as registered via @server.prompt() (defaults to
+                     the function name), without the leading "/".
+        :return: concatenated text content of the prompt's message(s).
+        :raises ToolExecutorError: if the prompt doesn't exist or the connection fails.
+        """
+        try:
+            result = await self._require_session().get_prompt(name)
+        except MCPError as e:
+            raise ToolExecutorError(f"MCP connection failed fetching prompt '{name}': {e}") from e
+        return "\n".join(
+            message.content.text for message in result.messages if isinstance(message.content, types.TextContent)
+        )
+
 # For test only
 async def main() -> None:
     """Manual smoke test against the real sheets_server.py subprocess - connect,

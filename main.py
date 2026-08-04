@@ -20,7 +20,8 @@ async def main() -> None:
         agent = AiAgent(api_key=ANTHROPIC_API_KEY,
                         system_prompt=generate_personal_career_and_finance_plan(),
                         tools=await client.list_tools(),
-                        tool_executor=client.call_tool)
+                        tool_executor=client.call_tool,
+                        prompt_resolver=client.get_prompt)
         await agent.run()
 
 

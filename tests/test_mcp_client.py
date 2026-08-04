@@ -44,6 +44,12 @@ class TestNotConnected:
         with pytest.raises(RuntimeError):
             asyncio.run(client.call_tool("get_answer", {}))
 
+    def test_get_prompt_before_connecting_raises_runtime_error(self):
+        client = McpClient(Path("unused_server.py"))
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(client.get_prompt("portfolio"))
+
 
 class TestListTools:
     def test_converts_tools_to_anthropic_schema(self):
@@ -134,3 +140,48 @@ class TestCallTool:
             assert False, "expected ToolExecutorError"
         except ToolExecutorError as e:
             assert e.__cause__ is original
+
+
+class TestGetPrompt:
+    def test_successful_resolution_returns_text(self):
+        session = AsyncMock()
+        session.get_prompt.return_value = types.GetPromptResult(
+            messages=[types.PromptMessage(role="user", content=types.TextContent(type="text", text="Give me a portfolio review."))]
+        )
+        client = make_client(session)
+
+        result = asyncio.run(client.get_prompt("portfolio"))
+
+        assert result == "Give me a portfolio review."
+
+    def test_multiple_messages_are_joined_with_newlines(self):
+        session = AsyncMock()
+        session.get_prompt.return_value = types.GetPromptResult(
+            messages=[
+                types.PromptMessage(role="user", content=types.TextContent(type="text", text="line1")),
+                types.PromptMessage(role="user", content=types.TextContent(type="text", text="line2")),
+            ]
+        )
+        client = make_client(session)
+
+        result = asyncio.run(client.get_prompt("portfolio"))
+
+        assert result == "line1\nline2"
+
+    def test_unknown_prompt_raises_tool_executor_error_not_mcp_error(self):
+        """Unlike call_tool, there's no soft is_error outcome for prompts - an
+        unknown name is itself a transport-level MCPError, same as a dead connection."""
+        session = AsyncMock()
+        session.get_prompt.side_effect = MCPError(code=-1, message="Unknown prompt: does_not_exist")
+        client = make_client(session)
+
+        with pytest.raises(ToolExecutorError):
+            asyncio.run(client.get_prompt("does_not_exist"))
+
+    def test_dead_connection_raises_tool_executor_error(self):
+        session = AsyncMock()
+        session.get_prompt.side_effect = MCPError(code=-1, message="Connection closed")
+        client = make_client(session)
+
+        with pytest.raises(ToolExecutorError, match="portfolio"):
+            asyncio.run(client.get_prompt("portfolio"))

@@ -89,17 +89,28 @@ all — even Phase 3's minimal version needs to shell out to another repo's CLI.
       payoff was ticking a protocol-coverage box, not demonstrating anything
       real. Not worth the surface area; MCP has three primitives and this repo
       will cover two (tools, prompts) meaningfully instead of three thinly.
-- [ ] **Prompt**: a portfolio-only review template — queries current portfolio
-      value and structure (via the tools above) for when the user wants to
-      discuss the portfolio alone, not the combined career+financial problem.
-      User-controlled, the third primitive.
+- [x] **Prompt**: `sheets_server.py::portfolio()` — a canned question ("current
+      total portfolio value, composition, and unrealized gain... don't bring in
+      career planning unless I ask") the user invokes as `/portfolio`, not a
+      hardcoded query: the resolved text is sent to Claude like any other
+      message, and the model still decides which tools to call. User-controlled,
+      the third primitive. Client side needed building too, not just the
+      decorator: `McpClient.get_prompt()` (mirrors `call_tool`'s error handling -
+      an unknown prompt name is itself an `MCPError`, no soft `is_error` outcome
+      the way tools have, so it raises `ToolExecutorError` same as a dead
+      connection) and a `PromptResolver` protocol in `agent.py` (mirrors
+      `ToolExecutor`, same reason: `agent.py` must not import anything
+      MCP-specific). `run()` now special-cases `/name` input before it touches
+      memory, resolving it and substituting the resolved text as the turn's
+      content - the model never sees the literal slash command. Verified
+      end-to-end against the real subprocess and a real Claude call.
 - [x] Client exercises the lifecycle, not just `call_tool`: `main.py` opens
       `McpClient` as `async with` (spawn + `initialize` handshake), calls
       `list_tools()`, wires the result straight into `AiAgent(tools=...,
-      tool_executor=client.call_tool)`. Verified end-to-end: real subprocess,
-      real tool call, real data back. `list_prompts` isn't exercised yet -
-      no prompt exists until the item below lands; `list_resources` no longer
-      applies (Resources were dropped, see above).
+      tool_executor=client.call_tool, prompt_resolver=client.get_prompt)`.
+      Verified end-to-end: real subprocess, real tool call, real prompt
+      resolution, real data back. `list_resources` no longer applies
+      (Resources were dropped, see above).
 - [x] Error paths, deliberately: tool raises, server dies mid-session,
       malformed arguments from the model. Probed the SDK empirically (not
       guessed) to find both are already the *same* shape at the transport
@@ -129,8 +140,13 @@ between "I made a tool work" and knowing the protocol — which matters for the
 certification this work doubles as preparation for. Resources were tried and
 cut (see above): thin coverage of all three primitives was worse than solid
 coverage of two.
-- [x] Tests: mocked Sheets client; server starts and lists tools; no network —
-      `tests/test_sheets_server.py`.
+- [x] Tests: mocked Sheets client; server starts and lists tools and prompts;
+      no network — `tests/test_sheets_server.py`, `tests/test_mcp_client.py`,
+      `tests/test_agent.py::TestSlashCommands`.
+
+**Done.** Tools, Prompt, full client lifecycle, and error paths are all built,
+tested, and verified end-to-end against a real subprocess and a real Claude
+call - not just unit tests in isolation. 79 tests green, pylint clean.
 
 ## Phase 3 — Simulator MCP server
 

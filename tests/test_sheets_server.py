@@ -10,7 +10,7 @@ import asyncio
 import pytest
 
 from src import sheets_server
-from src.sheets_server import _read_tab, read_networth_overview, read_portfolio_overview
+from src.sheets_server import _read_tab, portfolio, read_networth_overview, read_portfolio_overview
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +40,11 @@ class TestServerRegistersTools:
         tools = asyncio.run(sheets_server.server.list_tools())
 
         assert {t.name for t in tools} == {"read_portfolio_overview", "read_networth_overview"}
+
+    def test_lists_the_portfolio_prompt_by_name(self):
+        prompts = asyncio.run(sheets_server.server.list_prompts())
+
+        assert {p.name for p in prompts} == {"portfolio"}
 
 
 class TestReadTab:
@@ -84,6 +89,20 @@ class TestToolsReadTheConfiguredTab:
         result = read_networth_overview()
 
         assert "Broker" in result
+
+
+class TestPortfolioPrompt:
+    def test_asks_for_value_composition_and_unrealized_gain(self):
+        text = portfolio()
+
+        assert "value" in text.lower()
+        assert "composition" in text.lower()
+        assert "unrealized gain" in text.lower()
+
+    def test_scopes_out_career_planning(self):
+        text = portfolio()
+
+        assert "career" in text.lower()  # explicitly excluded, not just absent
 
 
 class TestToolRaisesPropagatesNotSwallowed:

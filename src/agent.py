@@ -16,12 +16,26 @@ class ToolExecutor(Protocol):
     async def __call__(self, name: str, arguments: dict) -> str: ...
 
 
+class PromptResolver(Protocol):
+    """An async callable that resolves a named MCP prompt to its message text.
+
+    Mirrors ToolExecutor for the same reason: run()'s slash-command handling stays
+    swappable and testable without a real transport. McpClient.get_prompt satisfies
+    it directly. Prompts are the *user*-controlled primitive - the user picks which
+    canned question to ask (e.g. "/portfolio"); the resolved text is then sent to
+    Claude like any other message, so the model still decides which tools to call.
+    """
+
+    async def __call__(self, name: str) -> str: ...
+
+
 class ToolExecutorError(Exception):
-    """Raised by a ToolExecutor when the transport itself fails - e.g. the MCP server
-    process died mid-session - as opposed to the tool running and reporting failure
-    normally, which is just ordinary tool_result text, not an exception (the model
-    can reason about "the tool said X went wrong"; it cannot reason about "the pipe
-    to the tool closed", so that case is surfaced as a whole-turn failure instead).
+    """Raised by a ToolExecutor or PromptResolver when the transport itself fails -
+    e.g. the MCP server process died mid-session, or the requested prompt doesn't
+    exist - as opposed to a tool running and reporting failure normally, which is
+    just ordinary tool_result text, not an exception (the model can reason about
+    "the tool said X went wrong"; it cannot reason about "the pipe to the tool
+    closed", so that case is surfaced as a whole-turn failure instead).
     Kept here, not in mcp_client.py, for the same reason as ToolExecutor itself:
     agent.py must not import anything MCP-specific, and any transport can raise it.
     """
@@ -43,6 +57,7 @@ class AiAgent:
         count_of_answers_to_keep_after_summary: int = 10,
         tools: list[dict] | None = None,
         tool_executor: ToolExecutor | None = None,
+        prompt_resolver: PromptResolver | None = None,
         max_tool_iterations: int = 10,
     ) -> None:
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
@@ -61,6 +76,7 @@ class AiAgent:
         self._count_of_answers_to_keep_after_summary: int = count_of_answers_to_keep_after_summary  # Amount of answers to keep after the summary
         self._tools: list[dict] = tools or []
         self._tool_executor: ToolExecutor | None = tool_executor
+        self._prompt_resolver: PromptResolver | None = prompt_resolver
         self._max_tool_iterations: int = max_tool_iterations
         self.__memory: list[dict] = []
 
@@ -225,6 +241,21 @@ class AiAgent:
             # Check if exit command is given
             if user_message.strip().lower() in ("exit", "quit", "bye"):
                 break
+
+            # A "/name" slash command resolves to an MCP prompt's message text, which
+            # replaces the literal command as this turn's content - Claude never sees
+            # "/portfolio", only the canned question it expands to. Resolved before
+            # turn_start/memory are touched, so a failure here needs no rollback.
+            if user_message.startswith("/"):
+                prompt_name = user_message[1:].strip()
+                if self._prompt_resolver is None:
+                    print(f"No prompts available - '/{prompt_name}' needs an MCP server that defines one.")
+                    continue
+                try:
+                    user_message = await self._prompt_resolver(prompt_name)
+                except ToolExecutorError as e:
+                    print(f"Could not resolve prompt '/{prompt_name}': {e}")
+                    continue
 
             # Snapshot memory length so a failure anywhere in this turn - including mid
             # tool-calling round-trip, which appends several messages - can be rolled back
