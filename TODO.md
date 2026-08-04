@@ -183,7 +183,12 @@ different contract. Decide with a measurement, not a guess.
 
 ## Phase 4 — Packaging
 
-- [ ] CI workflow (`pytest` on push) — this repo has none yet.
+- [x] CI workflow (`pytest` on push) — `.github/workflows/ci.yml`. Runs on push
+      and PR to `main`: checkout, `setup-python` 3.14, `pip install -r
+      requirements-dev.txt`, `pytest tests/`. No secrets needed - verified by
+      cloning to a scratch dir with a fully clean environment (`env -i`, no
+      `.env`, no `config.toml`, no `.secrets/`) and a fresh venv: all 79 tests
+      passed, exactly what CI will see.
 - [ ] README: architecture, quickstart, example transcript showing the agent
       calling tools.
 - [ ] Demo path: one command answering a real question end to end.
