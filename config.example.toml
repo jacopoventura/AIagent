@@ -10,5 +10,5 @@ spreadsheet_id = "REPLACE_WITH_YOUR_SHEET_ID"
 
 [sheets.tabs]
 # Tab name exactly as it appears in the spreadsheet - used for the Sheets API range.
-portfolio_development = "Portfolio Development"
-dashboard = "Dashboard"
+portfolio_overview_tab = "Portfolio Development"
+networth_overview_tab = "Dashboard"

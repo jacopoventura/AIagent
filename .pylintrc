@@ -7,3 +7,9 @@ max-line-length=150
 # leading underscores (protected/name-mangled attributes like self.__memory)
 # while keeping everything else snake_case.
 attr-rgx=^_{0,2}[a-z][a-z0-9_]*$
+
+[TYPECHECK]
+# googleapiclient.discovery.build() returns a Resource whose methods
+# (.spreadsheets(), .values(), ...) are generated at runtime from the API
+# discovery document, so pylint sees no attributes on it without this.
+generated-members=googleapiclient.discovery.Resource.*
