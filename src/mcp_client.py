@@ -39,9 +39,26 @@ class McpClient:
         self._session: ClientSession | None = None
 
     async def __aenter__(self) -> "McpClient":
-        read_stream, write_stream = await self._exit_stack.enter_async_context(stdio_client(self._server_params))
-        self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
-        await self._session.initialize()
+        """
+        :raises ToolExecutorError: if the server fails to start or the handshake
+                 fails (e.g. it crashes before completing `initialize()`) - the
+                 same transport-failure signal call_tool/get_prompt raise once
+                 connected, kept consistent so callers only ever handle one type.
+        """
+        try:
+            read_stream, write_stream = await self._exit_stack.enter_async_context(stdio_client(self._server_params))
+            self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
+            await self._session.initialize()
+        except MCPError as e:
+            # __aenter__ raising means the `async with` protocol will never call
+            # __aexit__, so anything already entered onto the stack (e.g. the
+            # subprocess, if stdio_client succeeded but initialize() then failed)
+            # is our own responsibility to tear down here - left alone, it's
+            # orphaned for the garbage collector to find later, in whatever task
+            # happens to be running by then, which is what produced the disorderly
+            # "cancel scope in a different task" noise this fixes.
+            await self._exit_stack.aclose()
+            raise ToolExecutorError(f"MCP server failed to start: {e}") from e
         return self
 
     async def __aexit__(

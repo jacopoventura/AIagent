@@ -8,6 +8,7 @@ the model can reason about, so it must come back as ToolExecutorError instead -
 the transport-agnostic type agent.py's run() catches as a whole-turn failure.
 """
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,7 @@ import pytest
 from mcp import types
 from mcp.shared.exceptions import MCPError
 
+from src import mcp_client as mcp_client_module
 from src.agent import ToolExecutorError
 from src.mcp_client import McpClient
 
@@ -49,6 +51,43 @@ class TestNotConnected:
 
         with pytest.raises(RuntimeError):
             asyncio.run(client.get_prompt("portfolio"))
+
+
+class TestConnectionFailure:
+    """A server that dies before or during the handshake is a different failure
+    window than a dead mid-call connection (TestCallTool below) - found empirically
+    by killing a real subprocess at every stage: __aenter__ had no MCPError handling
+    at all, so a handshake failure propagated as a raw MCPError instead of the
+    ToolExecutorError every other failure path already produces."""
+
+    @staticmethod
+    def _patch_failing_handshake(monkeypatch, exception: Exception) -> None:
+        @asynccontextmanager
+        async def fake_stdio_client(_params):
+            yield (AsyncMock(), AsyncMock())
+
+        class FakeSession:
+            def __init__(self, _read_stream, _write_stream):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_exc_info):
+                return False
+
+            async def initialize(self):
+                raise exception
+
+        monkeypatch.setattr(mcp_client_module, "stdio_client", fake_stdio_client)
+        monkeypatch.setattr(mcp_client_module, "ClientSession", FakeSession)
+
+    def test_handshake_failure_raises_tool_executor_error_not_mcp_error(self, monkeypatch):
+        self._patch_failing_handshake(monkeypatch, MCPError(code=-1, message="Connection closed"))
+        client = McpClient(Path("unused_server.py"))
+
+        with pytest.raises(ToolExecutorError):
+            asyncio.run(client.__aenter__())
 
 
 class TestListTools:

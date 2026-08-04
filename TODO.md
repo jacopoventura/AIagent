@@ -132,6 +132,26 @@ all — even Phase 3's minimal version needs to shell out to another repo's CLI.
       ToolExecutorError), `tests/test_agent.py::TestRunToolLoop::
       test_dead_mcp_connection_rolls_back_the_failed_turn`,
       `tests/test_sheets_server.py::TestToolRaisesPropagatesNotSwallowed`.
+      **Follow-up from review feedback**: "kill the server mid-call and see
+      what actually happens" - the earlier verification only had the tool kill
+      *its own* process; an externally-sent `SIGKILL` (real subprocess PID,
+      timed at 7 different offsets mid-call, plus idle-then-call, plus
+      mid-handshake) was untested. Result: `MCPError` was the type in every
+      case - the SDK's stdio transport already normalizes broken-pipe/closed-
+      resource races internally - so the earlier fix's *type* was right, but
+      one *site* was missing it: `McpClient.__aenter__()` had no MCPError
+      handling at all, so a death during the handshake propagated as a raw
+      `MCPError` instead of `ToolExecutorError`. Fixed, and `main.py` now
+      catches `ToolExecutorError` around the connection and exits cleanly
+      (`SystemExit`) instead of a raw traceback. Also found and fixed a real
+      resource leak while at it: `__aenter__` raising means `__aexit__` is
+      never called (context-manager protocol), so anything already entered
+      onto `self._exit_stack` (e.g. a successfully spawned subprocess, if
+      `stdio_client` succeeded but `initialize()` failed after) was being
+      abandoned for the garbage collector - which is what produced disorderly
+      "cancel scope in a different task" noise on this one path. Fixed by
+      explicitly `await self._exit_stack.aclose()` in the except block before
+      re-raising. Test: `tests/test_mcp_client.py::TestConnectionFailure`.
 
 *Why more than the minimum:* a client plus one tool-serving server demonstrates
 roughly 40% of MCP's surface. Covering tools and prompts properly, the full
