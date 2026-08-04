@@ -11,6 +11,11 @@ YELLOW='\033[0;33m'
 RESET='\033[0m'
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# ── Privacy guard: personal data and secrets must never enter history ────────
+# shellcheck source=hooks/privacy-guard.sh
+source "$REPO_ROOT/hooks/privacy-guard.sh"
+privacy_guard || exit 1
 PYTHON="$REPO_ROOT/.venv/bin/python"
 PYLINT_MIN_SCORE=8
 
