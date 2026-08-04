@@ -1,0 +1,14 @@
+# Machine-specific configuration. Copy to config.toml (gitignored) and fill in
+# real values - never commit config.toml, see hooks/privacy-guard.sh.
+
+[sheets]
+# Path to the service-account JSON key (see TODO.md Phase 2 setup), relative
+# to the repo root.
+credentials_path = ".secrets/service-account.json"
+# The spreadsheet's ID: the long string in its URL between /d/ and /edit.
+spreadsheet_id = "REPLACE_WITH_YOUR_SHEET_ID"
+
+[sheets.tabs]
+# Tab name exactly as it appears in the spreadsheet - used for the Sheets API range.
+portfolio_development = "Portfolio Development"
+dashboard = "Dashboard"

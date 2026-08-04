@@ -18,6 +18,8 @@ env/
 # Environment / secrets
 .env
 .env.*
+/.secrets/
+/config.toml
 
 # OS
 .DS_Store

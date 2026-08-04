@@ -72,13 +72,15 @@ with it, tests green.
 Blocked by: nothing. Built first because it has no cross-repo dependency at
 all — even Phase 3's minimal version needs to shell out to another repo's CLI.
 
+- [x] Auth: **service account, not OAuth user flow**. Service account created,
+      JSON key in `.secrets/` (gitignored), spreadsheet shared with it, Sheet ID
+      and both tab names in `config.toml` (gitignored; `config.example.toml`
+      committed as the template).
 - [ ] stdio MCP server in this repo.
-- [ ] Auth: **service account, not OAuth user flow**. Create the service account,
-      download the JSON key, share the spreadsheet with the service account's
-      email. No browser consent, no refresh-token handling, no expiry.
-      Key in `.secrets/` (gitignored).
-- [ ] Tools: `read_portfolio_development()`, `read_dashboard()`. Both sheets are
-      already summary-level, so each returns its sheet whole.
+- [ ] Tools: `read_portfolio_overview()`, `read_networth_overview()` — one
+      spreadsheet, two tabs (`portfolio` and `NW`, per `config.toml`), not two
+      separate spreadsheets. Both already summary-level, so each returns its
+      tab whole.
 - [ ] **Resource**: sheet metadata (last updated, column schema). Resources are
       *application*-controlled where tools are *model*-controlled — implementing
       both is the only way to internalise that distinction.
