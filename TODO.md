@@ -12,7 +12,7 @@ history, plan and targets.
 ```
 AIagent repo                              portfolio-lifecycle-simulator repo
 ├── MCP client (agent + tool loop)
-├── context/profile.md → system prompt
+├── data/personal/*.docx → system prompt
 ├── sheets MCP server ────── stdio ──┐
 └── config.toml (gitignored) ────────┴── stdio ──→ simulator MCP server
 ```
@@ -59,18 +59,28 @@ Blocked by: nothing. This is the risky part and it is testable in isolation.
 
 Blocked by: nothing.
 
-- [ ] `context/profile.md` (gitignored), structured per the committed
-      `context.example.md`: who I am, career plan and decision log, financial
-      position and goals, public GitHub portfolio, and how I want to be advised.
-      Grounds every answer in the actual plan rather than generic advice.
+- [x] CV and career plan: parsed directly from `.docx` files in `data/personal/`
+      (gitignored) on every agent startup — `src/context.py::load_personal_context`
+      globs the directory, extracts paragraph text, concatenates one section per
+      file. Superseded the original `context/profile.md` plan below: the source
+      documents get edited often, and a hand-curated copy would drift out of
+      sync with them. Parsing costs milliseconds, once, at process start, so
+      "static context" still holds — it just gets read fresh each run instead
+      of hand-copied once. A missing or corrupt file is skipped with a warning,
+      never crashes startup.
+- [ ] `context.example.md`'s remaining sections — financial position and goals,
+      public GitHub portfolio, how I want to be advised — are not covered by
+      the CV/career-plan docx files and still need a source. Decide whether
+      that stays a small curated file (trimmed `context.example.md` shape) or
+      folds into the system prompt directly.
 - [ ] Public portfolio section is a dated **snapshot**, not live data. A GitHub
       API tool would add a dependency and a round-trip to fetch something that
       changes monthly; what matters for career conversations is what each repo
       *demonstrates*, not its star count. Revisit only if staleness bites.
-- [ ] Load at startup into the system prompt.
+- [x] Load at startup into the system prompt.
 - [ ] Prompt caching (`cache_control: ephemeral`) — the block is resent every
       turn otherwise.
-- [ ] Tests: agent runs with the context file absent (falls back cleanly).
+- [x] Tests: agent runs with the context file absent (falls back cleanly).
 
 ## Phase 3 — Sheets MCP server (first real server)
 
