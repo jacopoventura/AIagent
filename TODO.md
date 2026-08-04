@@ -76,16 +76,23 @@ all — even Phase 3's minimal version needs to shell out to another repo's CLI.
       JSON key in `.secrets/` (gitignored), spreadsheet shared with it, Sheet ID
       and both tab names in `config.toml` (gitignored; `config.example.toml`
       committed as the template).
-- [ ] stdio MCP server in this repo.
-- [ ] Tools: `read_portfolio_overview()`, `read_networth_overview()` — one
-      spreadsheet, two tabs (`portfolio` and `NW`, per `config.toml`), not two
-      separate spreadsheets. Both already summary-level, so each returns its
-      tab whole.
-- [ ] **Resource**: sheet metadata (last updated, column schema). Resources are
-      *application*-controlled where tools are *model*-controlled — implementing
-      both is the only way to internalise that distinction.
-- [ ] **Prompt**: a "monthly review" template. User-controlled, the third
-      primitive.
+- [x] stdio MCP server in this repo — `src/sheets_server.py`. Config load +
+      auth deferred into `_init()`, called only from `__main__`, so importing
+      the module needs no `config.toml`, credentials, or network.
+- [x] Tools: `read_portfolio_overview()`, `read_networth_overview()` — one
+      spreadsheet, two tabs (`portfolio_overview_tab` and `networth_overview_tab`,
+      per `config.toml`), not two separate spreadsheets. Both already
+      summary-level, so each returns its tab whole, rendered as a markdown table.
+- [x] ~~**Resource**: column schema per tab~~ — built, then dropped. Nothing
+      in this repo's client is application code that would ever decide to
+      attach a resource on its own (it's a plain CLI chat loop), so the only
+      payoff was ticking a protocol-coverage box, not demonstrating anything
+      real. Not worth the surface area; MCP has three primitives and this repo
+      will cover two (tools, prompts) meaningfully instead of three thinly.
+- [ ] **Prompt**: a portfolio-only review template — queries current portfolio
+      value and structure (via the tools above) for when the user wants to
+      discuss the portfolio alone, not the combined career+financial problem.
+      User-controlled, the third primitive.
 - [ ] Client exercises the full lifecycle, not just `call_tool`: initialize
       handshake, capability negotiation, `list_tools` / `list_resources` /
       `list_prompts`, then invocation.
@@ -94,11 +101,14 @@ all — even Phase 3's minimal version needs to shell out to another repo's CLI.
       break, and where understanding shows.
 
 *Why more than the minimum:* a client plus one tool-serving server demonstrates
-roughly 40% of MCP's surface. Covering all three primitives, the lifecycle and
-the failure modes costs about a day more and is the difference between "I made a
-tool work" and knowing the protocol — which matters for the certification this
-work doubles as preparation for.
-- [ ] Tests: mocked Sheets client; server starts and lists tools; no network.
+roughly 40% of MCP's surface. Covering tools and prompts properly, the full
+lifecycle and the failure modes costs about a day more and is the difference
+between "I made a tool work" and knowing the protocol — which matters for the
+certification this work doubles as preparation for. Resources were tried and
+cut (see above): thin coverage of all three primitives was worse than solid
+coverage of two.
+- [x] Tests: mocked Sheets client; server starts and lists tools; no network —
+      `tests/test_sheets_server.py`.
 
 ## Phase 3 — Simulator MCP server
 
