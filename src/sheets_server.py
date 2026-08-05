@@ -1,7 +1,6 @@
 """Sheets MCP server: read-only access to the portfolio spreadsheet over stdio.
 
-Auth is a service account (TODO.md Phase 2) - no browser consent, no refresh
-tokens, no expiry handling. Both tools return their tab whole: the spreadsheet
+Auth is a service account tokens, no expiry handling. Both tools return their tab whole: the spreadsheet
 is already summary-level, so there is nothing to filter client-side.
 
 Structure - no class, no context manager, unlike the client side (mcp_client.py):
@@ -99,13 +98,13 @@ def _read_tab(tab_name: str) -> str:
 
 @server.tool()
 def read_portfolio_overview() -> str:
-    """Read the portfolio development tab: current family's portfolio overview."""
+    """Read the portfolio development tab: current family's portfolio overview (user AND user's spouse assets)."""
     return _read_tab(_TABS["portfolio_overview_tab"])
 
 
 @server.tool()
 def read_networth_overview() -> str:
-    """Read the net-worth tracking tab."""
+    """Read the net-worth tracking tab. This is the family (user and user's spouse) net worth."""
     return _read_tab(_TABS["networth_overview_tab"])
 
 
@@ -113,7 +112,8 @@ def read_networth_overview() -> str:
 def portfolio() -> str:
     """Portfolio-only review: value, composition, and unrealized gain - no career planning."""
     return (
-        "Give me a portfolio-only review: current total portfolio value, its composition "
+        "Give me the family's (user AND user's spouse assets) portfolio-only review: "
+        "current total portfolio value, its composition "
         "(allocation across holdings), and unrealized gain, using the portfolio and net-worth "
         "tools. Stick to the portfolio - don't bring in career planning unless I ask for it."
     )

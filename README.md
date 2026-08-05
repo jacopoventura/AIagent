@@ -186,6 +186,89 @@ Optionally enable the pre-commit hook (privacy guard, syntax check, tests):
 git config core.hooksPath hooks
 ```
 
+## Lessons learned
+
+Things that were not obvious from the documentation, and cost real debugging
+time. Recorded because the reasoning is more transferable than the code.
+
+### Tool descriptions are prompt engineering, not documentation
+
+Asked *"what portfolio covers €2,000/month?"*, the agent replied with four
+clarifying questions and then quoted the 4% rule — arriving at €600,000 against
+a correct figure nearer €857,000, because the user's configured withdrawal rate
+is 2.8%. It had the tool. It didn't call it.
+
+Two causes, both in what the model could see:
+
+- The tool's parameters were all `float | None = None`, meaning *"omit to use
+  the user's saved plan"* — but nothing said so. Ten optional nulls look like
+  missing information, so it asked.
+- The parameters reached the model as bare types: `{"anyOf": [number, null],
+  "title": "Bonds Percentage"}`. No units, no ranges. Is `bonds_percentage`
+  `50` or `0.5`?
+
+The fix was entirely in text the model reads, not in logic:
+
+1. State the fallback explicitly in the docstring — *"EVERY PARAMETER IS
+   OPTIONAL. Omitted parameters use the user's saved plan. Do not ask."*
+2. Give every parameter a `Field(description=...)`, including units and the
+   `0-100 (not 0-1)` traps.
+3. **Interpolate the live config values into the description at server
+   startup**, so the model sees `withdrawal rate 2.8%/yr, 15y horizon` before
+   deciding whether it needs to ask.
+4. Return `assumptions_used` in the result, so the answer can state which
+   values were applied rather than applying them silently.
+
+The general lesson: when an agent behaves badly, the bug is usually in what it
+was told, not in what it can do. Behavioural rules that apply to every tool
+("prefer calling a tool over asking") belong in the system prompt — putting
+them in a tool description duplicates them across every tool and re-sends them
+on every request.
+
+### MCP servers are not always safe to connect concurrently
+
+Connecting several servers with `asyncio.gather` fails: `stdio_client` opens an
+anyio task group that is permanently bound to the task that opened it, and
+`gather` runs each `__aenter__` in its own short-lived task. Closing later from
+the owning `McpClientGroup` task then raises *"cancel scope in a different
+task"*. Verified against the real subprocess, not guessed. Connecting
+sequentially is the correct fix for two local servers; genuine concurrency
+would require each server to own a long-lived task for its whole connection
+lifetime.
+
+### stdout belongs to the protocol
+
+A stdio MCP server speaks JSON-RPC over stdout. Any `print()` from wrapped code
+corrupts the stream, and the failure is silent and confusing. Every call into
+the simulation engine is wrapped in `contextlib.redirect_stdout`.
+
+### "Connection closed" never explains itself
+
+When a stdio server dies during startup, the client only ever reports
+*"Connection closed"*. The real cause — a missing file, a failed import, a
+wrong interpreter — is on the subprocess's stderr, printed immediately *above*
+that message. Always read the line before.
+
+### Cross-repo servers need their own interpreter and working directory
+
+The simulator server lives in a sibling repository and imports a scientific
+stack this repo doesn't have. Three separate failures follow from launching it
+naively: the wrong Python (`sys.executable` is this repo's venv), the wrong
+`sys.path` (Python adds the *script's* directory, not the repo root — so the
+server must sit at that repo's root to import its siblings), and the wrong
+working directory (the engine resolves `config.toml` relatively). All three are
+solved in configuration — `StdioServerParameters` accepts `command`, `cwd` and
+`env` — not in code.
+
+### The error taxonomy a tool call needs
+
+Two failures look alike and must be handled differently. A tool that raised,
+got bad arguments, or doesn't exist is a *successful* MCP exchange reporting an
+error: it becomes `tool_result` text the model can read and retry from. A dead
+connection is not something the model can reason its way out of, so it fails
+the whole turn. Conflating them produces an agent that loops forever retrying a
+server that no longer exists.
+
 ## License
 
 [MIT](LICENSE.md)
