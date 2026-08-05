@@ -79,6 +79,11 @@ def _read_tab(tab_name: str) -> str:
     Fetch a tab's full used range and render it as a markdown pipe table - the
     same format `context.py` renders docx tables in, since it's what the model
     parses reliably.
+
+    A row containing "AGENT STOP" is a sentinel some tabs use to mark where
+    agent-relevant data ends (e.g. notes or scratch rows follow) - reading
+    stops one row above it, so neither that row nor anything below it is
+    included.
     :param tab_name: sheet tab name exactly as it appears in the spreadsheet.
     :return: markdown table, or a message noting the tab has no data.
     """
@@ -88,6 +93,10 @@ def _read_tab(tab_name: str) -> str:
         return f"'{tab_name}' is empty."
 
     header, *body = rows
+    for i, row in enumerate(body):
+        if "AGENT STOP" in row:
+            body = body[:i]
+            break
     width = len(header)
     body = [row + [""] * (width - len(row)) for row in body]
 

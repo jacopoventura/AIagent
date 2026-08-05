@@ -74,6 +74,34 @@ class TestReadTab:
 
         assert "| 2026-01-01 | 100 |  |" in result
 
+    def test_stops_one_row_above_agent_stop_marker(self, monkeypatch):
+        mock_values(monkeypatch, [
+            ["Date", "Value"],
+            ["2026-01-01", "100"],
+            ["AGENT STOP", ""],
+            ["2026-02-01", "110"],
+        ])
+
+        result = _read_tab("Portfolio Development")
+
+        assert "2026-01-01" in result
+        assert "AGENT STOP" not in result
+        assert "2026-02-01" not in result
+
+    def test_agent_stop_marker_can_appear_in_any_column(self, monkeypatch):
+        mock_values(monkeypatch, [
+            ["Date", "Value"],
+            ["2026-01-01", "100"],
+            ["", "AGENT STOP"],
+            ["2026-02-01", "110"],
+        ])
+
+        result = _read_tab("Portfolio Development")
+
+        assert "2026-01-01" in result
+        assert "AGENT STOP" not in result
+        assert "2026-02-01" not in result
+
 
 class TestToolsReadTheConfiguredTab:
     def test_read_portfolio_overview_reads_portfolio_development_tab(self, monkeypatch):
