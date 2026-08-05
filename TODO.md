@@ -168,40 +168,136 @@ coverage of two.
 tested, and verified end-to-end against a real subprocess and a real Claude
 call - not just unit tests in isolation. 79 tests green, pylint clean.
 
-## Phase 3 — Simulator MCP server
+## Phase 3 — Many servers, not one
 
-Blocked by: nothing, for a **minimal version** — shell out to whatever the
-engine already prints today (even unstructured) and return it as-is via a
-single tool, e.g. `get_last_summary()`. Claude can work with loosely-structured
-text; it just costs more tokens and can't reliably explain *why* a result came
-out as it did until the structured version lands. The **full version**
-(`--json`, `--fast`, section selection, `--record` gating — see that repo's
-`CLAUDE.md` §3) is blocked on that refactor in the sibling repo; upgrade to it
-once available rather than waiting for it to start.
+Blocked by: nothing. Do this **before** writing the second server, or the
+second server's wiring gets built twice.
+
+Today `main.py` holds one `McpClient` and hands the agent that client's three
+methods. The agent needs no change: it depends on `list_tools()`,
+`call_tool(name, args)` and `get_prompt(name)`, so anything exposing the same
+three methods can take the client's place.
+
+- [x] `McpClientGroup` — owns several `McpClient`s, presents the same interface:
+      - `list_tools()` → merged list across servers, cached at connect time
+      - `call_tool(name, args)` → routed to the owning server
+      - `get_prompt(name)` → routed to the owning server
+      Built as an async context manager like `McpClient` — `main.py` now opens
+      `async with McpClientGroup(clients) as group:` over a `dict[str, McpClient]`
+      instead of a single `McpClient`. `src/mcp_client.py::McpClientGroup`.
+      Needed one small prerequisite on `McpClient` itself: `list_prompts()`
+      (mirrors `list_tools()`), since routing `get_prompt()` requires knowing
+      *which* server owns a given prompt name before calling it — something the
+      single-server client never had to answer.
+- [x] Routing table, built once at connect time from each live server's
+      `list_tools()`/`list_prompts()` — `McpClientGroup._register()`, called for
+      both tools and prompts (`self._tool_owner`, `self._prompt_owner`).
+- [x] **Name collisions**: two servers exposing the same tool *or prompt* name
+      (extended from the original tools-only bullet — prompts get the identical
+      treatment for the identical reason) is a configuration error, not
+      something to resolve silently. Detected in `_register()` at connect time,
+      raised as `ServerCollisionError` naming both servers. Subclasses
+      `ToolExecutorError` rather than living in `agent.py` — it's an MCP-wiring
+      concern the agent never needs to know exists, since a collision aborts
+      startup before `AiAgent` is even constructed. (Prefixing — `sheets.read_x`
+      — remains the rejected alternative, same reasoning as before: you own
+      both servers, don't collide.)
+- [x] **Partial failure**: a server that fails to connect is warned about and
+      skipped, not fatal — a dead simulator should not block portfolio
+      questions. Only fatal (`ToolExecutorError`) if *no* server connects.
+      `main.py` no longer exits on one dead server, only on total failure.
+- [x] ~~Connect servers concurrently (`asyncio.gather`)~~ — attempted, reverted
+      after it broke against the real `sheets_server.py` subprocess, not a
+      hypothetical: `asyncio.gather` runs each `client.__aenter__()` in its own
+      asyncio Task; `McpClient.__aenter__` opens an `anyio` task group (inside
+      `stdio_client`) that is permanently tied to whichever task opened it.
+      Teardown later happens from `McpClientGroup`'s own task, not that
+      short-lived gather task, and anyio refuses to close a task group from a
+      different task than the one that opened it —
+      `RuntimeError: Attempted to exit cancel scope in a different task than it
+      was entered in`. Real concurrent connecting would need each server to own
+      a long-lived task for its whole connection lifetime, not just its connect
+      step — meaningfully more machinery than a couple of local subprocess
+      servers justify. Connects sequentially instead; reasoning kept in
+      `McpClientGroup.__aenter__`'s docstring so this isn't quietly "fixed" back.
+      Caught by actually running `main.py` end to end, not by the unit tests —
+      the fake-client test double has no `anyio` task group underneath it to
+      break, which is exactly why this was run for real before calling the
+      phase done, same lesson as Phase 2's mid-call-kill follow-up.
+- [x] Server list comes from `config.toml`: `[[mcp_servers]]` array of tables
+      (`name`, `script`), one entry today (sheets); `config.example.toml`
+      updated to match. `main.py` reads it and builds `{name: McpClient(...)}`.
+- [x] Tests: `tests/test_mcp_client_group.py`, 13 tests against a fake-client
+      double (not a real subprocess — see the concurrency note above for why
+      that boundary matters) — merged tool list, full entered/exited lifecycle,
+      `call_tool`/`get_prompt` routing plus unknown-name errors, tool *and*
+      prompt collisions (including a regression test that already-connected
+      clients get torn down when a later collision aborts `__aenter__`),
+      partial failure, total failure.
+
+**Done.** `McpClientGroup` is wired into `main.py` end to end and verified
+against the real `sheets_server.py` subprocess (clean connect, clean exit, no
+traceback) as well as 13 unit tests against a fake double. 93 tests green,
+pylint 10.00/10 on `main.py`/`src/`. One real bug found only by the real-
+subprocess run, not the unit tests — see the concurrency bullet above — which
+is the reason that verification step stays mandatory before calling a phase
+done, not just a nice-to-have.
+
+## Phase 4 — Simulator MCP server
+
+Blocked by: nothing. **The earlier plan assumed subprocess + `--json`; that was
+wrong.** This server lives *inside* `portfolio-lifecycle-simulator`, so it can
+import the engine directly — which removes the whole blocker list:
+
+| Assumed blocker | Why it disappears |
+|---|---|
+| `--json` structured output | Direct calls return typed objects; nothing to parse. |
+| `--fast` flag | Just pass `n_simulations=5_000` to the function. |
+| `--record` side-effect gating | Verified: `_append_history`, `_append_drift_snapshot` and `last_run_*` writes live **only** in that repo's `main.py`. The `compute_*` functions in `monte_carlo.py` are pure — calling them writes nothing. |
+| `--config` isolation | Build a `Config` in memory per call; never touch `config.toml`. |
+
+- [ ] FastMCP server in the simulator repo, importing `monte_carlo` directly.
+- [ ] Start with the pure compute functions, which need no refactor:
+      `compute_canonical_fi_required_scan`, `simulate_decumulation`,
+      `compute_two_bucket_required_wealth`, `compute_survival_matrix`.
+- [ ] Whitelist the ~12 overridable parameters at the tool boundary; keep tax
+      rates, `basiszins`, `teilfreistellung` and simulation counts internal.
+- [ ] Return *why* a result came out as it did — binding constraint, chosen
+      allocation, whether the search hit its bounds — so the model can reason
+      about the next call instead of guessing.
+- [ ] Annotate honestly: `readOnlyHint: true` on all of these (and retrofit the
+      sheets tools, which are also read-only).
+- [ ] Latency: control it with `n_simulations`, and **measure before choosing a
+      contract**. If a useful call still exceeds ~30s, the tool must become
+      `start_run()` → `get_result(job_id)` polling — a materially different
+      shape. Decide with a measurement, not a guess.
+- [ ] *Later*: a full `run_plan_check(overrides)` covering accumulation +
+      decumulation needs that repo's `main.py` orchestration extracted into a
+      callable `run_plan()`. Not required for the first useful tools.
 
 This is also where financial position and goals comes from — not a document.
 The target portfolio value and the assumptions behind it (withdrawal rate,
 confidence, tax treatment) are computed here from hypotheses that already live
 as config in `portfolio-lifecycle-simulator`; see the decision table above.
 
-- [ ] Minimal version: shell out to the simulator's current CLI output, return
-      it as-is via one tool.
-- [ ] Full version — tools: `run_plan_check(overrides)`, `get_last_summary()`,
-      `get_run_history()`.
-- [ ] Whitelist the ~12 overridable parameters at the tool boundary, not in the
-      CLI.
-- [ ] Return *why* a result came out as it did — binding constraint, chosen
-      allocation, whether the search hit its bounds — so the model can reason
-      about the next call instead of guessing. Needs the structured output.
+## Phase 5 — Writing documents (later)
 
-### Open question — latency may change the tool contract
+The first tool with side effects. Everything before it is read-only.
 
-A full run takes minutes; a chat loop tolerates seconds. Measure `--fast` first.
-If reduced runs still exceed ~30s, `run_plan_check` cannot stay synchronous and
-becomes `start_run()` → `get_result(job_id)` polling, which is a materially
-different contract. Decide with a measurement, not a guess.
+- [ ] **Move the career plan's source of truth to markdown.** Editing an
+      existing `.docx` in place means walking XML and preserving styles; editing
+      markdown is plain text and the change is reviewable as a diff. Generate
+      `.docx` from markdown when a formatted copy is wanted — one-way, boring.
+- [ ] **Propose, don't overwrite.** The tool returns a revised section, or
+      writes `career_plan_<date>.md` beside the original. The original is never
+      modified without an explicit human step. This document is the most
+      valuable artifact in `data/personal/`.
+- [ ] Annotate the tool truthfully: not `readOnlyHint`; set `destructiveHint`
+      according to what it actually does.
+- [ ] Tests: original file untouched; proposal written where expected; refuses
+      to write outside the allowed directory.
 
-## Phase 4 — Packaging
+## Phase 6 — Packaging
 
 - [x] CI workflow (`pytest` on push) — `.github/workflows/ci.yml`. Runs on push
       and PR to `main`: checkout, `setup-python` 3.14, `pip install -r

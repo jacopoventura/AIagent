@@ -3,6 +3,20 @@
 Auth is a service account (TODO.md Phase 2) - no browser consent, no refresh
 tokens, no expiry handling. Both tools return their tab whole: the spreadsheet
 is already summary-level, so there is nothing to filter client-side.
+
+Structure - no class, no context manager, unlike the client side (mcp_client.py):
+  - `server` (below) is one module-level MCPServer instance.
+  - Each function decorated `@server.tool()` or `@server.prompt()` becomes
+    visible to a connected client's list_tools()/list_prompts(); everything
+    else (_init, _load_config, _read_tab, ...) is a private helper, invisible
+    to the client.
+  - `if __name__ == "__main__":` calls `_init()` once, then
+    `asyncio.run(server.run_stdio_async())`, which blocks for the process's
+    entire life: read a request from stdin, dispatch it to the matching
+    decorated function, write the response to stdout, repeat. There's no
+    __aenter__/__aexit__ pair here because the server doesn't initiate a
+    connection - it just runs until stdin closes, which happens when the
+    client's __aexit__ closes its end of the pipe.
 """
 import asyncio
 import tomllib

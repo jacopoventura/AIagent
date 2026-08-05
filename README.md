@@ -54,6 +54,72 @@ account credentials live only in gitignored local files, with committed
 personal data never leaves the machine. A pre-commit hook (`hooks/`) blocks
 personal files and credential patterns from entering history.
 
+## Client and server
+
+MCP (Model Context Protocol) splits "the agent" and "the tools it can call" into
+two separate processes that talk to each other:
+
+- **The client** is this repository. It runs the chat loop, talks to Claude, and
+  — when Claude decides a tool is needed — routes that request to whichever
+  server owns it. It holds no domain logic of its own.
+- **A server** is a small, focused process that owns one capability and nothing
+  else: the sheets server (`src/sheets_server.py`) knows how to read the
+  portfolio spreadsheet; the simulator server (in `portfolio-lifecycle-simulator`)
+  knows how to run the Monte Carlo engine. Neither knows Claude exists — each
+  only speaks MCP.
+
+The client spawns each server as a subprocess and exchanges requests and
+responses with it over stdio (its stdin/stdout — no ports, no network). At
+startup the client asks every server "what tools do you have?" and hands that
+combined list to Claude; when Claude picks one, the client routes the call to
+the server that owns it and returns the result as plain text. That separation
+is what lets the simulator evolve independently in its own repository,
+versioned with the engine it wraps, while this repository only needs to speak
+MCP — never how Monte Carlo simulation works.
+
+**Who speaks first.** In this project, the client always asks and the server
+only answers — a server never sends anything the client did not request first.
+MCP itself does allow a server to speak first in some cases (a feature called
+"sampling," where a server can ask the client's Claude to do something for it),
+but this project does not use that feature. Here, it is always: client asks,
+server answers.
+
+**Talking to more than one server.** This project can connect to more than one
+server — for example, one for the spreadsheet and, later, one for the
+simulator. Instead of the rest of the code having to keep track of which
+server does what, there is one helper that connects to all of them and then
+behaves like a single server from the outside. If one server fails to start,
+the helper just skips it and keeps working with the others, so one broken
+server does not stop the whole app. If two servers happen to offer the same
+tool by mistake, the helper stops and says so clearly, instead of quietly
+guessing which one to use.
+
+**One connection, one server.** Each individual connection inside that helper
+talks to exactly one server — it is a dedicated link, not a shared one. It
+never talks to any other server, and no other connection talks to its server
+either. The helper (see "Talking to more than one server" above) is just
+several of these one-to-one, dedicated connections held side by side, one per
+server, so it can pick the right one for each request.
+
+**When this happens.** All of it happens once, right when the app starts, in
+two simple steps: first, try to connect to each server, one after another
+(not all at once — connecting each one ties it to a bit of internal state
+that breaks if it is closed from somewhere else later, so this project plays
+it safe and connects them in turn); then, for every server that connected,
+ask it "what can you do?" and write down which server can do what. After
+that, whenever the agent wants to use a tool, the app just looks up who owns
+it and sends the request straight there.
+
+**The shape every request follows.** Every time the app asks a server
+something — "what tools do you have," "run this tool," "what prompts do you
+have," "give me this prompt" — it follows the same three steps: make sure the
+connection is open, send the request to the server and wait for its reply,
+then turn that reply into plain text (or a plain list) so the rest of the app
+never has to know anything about MCP itself. Two of these (running a tool,
+asking for a prompt) also check whether the server died since connecting,
+since those can happen many times during one conversation, not just once at
+the very start.
+
 ## Requirements
 
 - Python 3.14+

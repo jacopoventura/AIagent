@@ -12,3 +12,8 @@ spreadsheet_id = "REPLACE_WITH_YOUR_SHEET_ID"
 # Tab name exactly as it appears in the spreadsheet - used for the Sheets API range.
 portfolio_overview_tab = "Portfolio Development"
 networth_overview_tab = "Dashboard"
+
+[[mcp_servers]]
+name = "sheets"
+script = "src/sheets_server.py"
+
