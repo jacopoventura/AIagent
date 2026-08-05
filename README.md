@@ -1,5 +1,10 @@
 # AIagent
 
+[![CI](https://github.com/jacopoventura/AIagent/actions/workflows/ci.yml/badge.svg)](https://github.com/jacopoventura/AIagent/actions/workflows/ci.yml)
+[![python](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/MCP-2.0-663399.svg)](https://modelcontextprotocol.io/)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.md)
+
 A personal Claude-based agent for thinking through **career and financial
 planning together** — because they are one problem. Earnings trajectory
 determines what the portfolio can become; the portfolio target determines how
