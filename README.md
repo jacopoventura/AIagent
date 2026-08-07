@@ -264,6 +264,11 @@ A stdio server speaks JSON-RPC over stdout. Any `print()` from wrapped code
 corrupts the stream, silently and confusingly. Every call into the simulation
 engine is wrapped in `contextlib.redirect_stdout`.
 
+# Note
+CLAUDE.md and skills are intended for Claude Code only to support the developer in the 
+agent development. System_prompt is used only by the API call to specify Claude's behaviour 
+as AIagent.
+
 ---
 
 ## License
